@@ -1,0 +1,255 @@
+# New Release Radio
+
+An **endless radio** over the [New Release Atlas](https://marcomauro.github.io/new-release-atlas/)
+archive. It starts from one track and keeps walking the music graph — shared
+artist, shared genre, same playlist — deciding the next track one step at a
+time. No playlist, no end: a station that plays the archive the way it is
+actually connected.
+
+The map is the other project. Here there is **no graph on screen**: just the
+cover of what is playing, its title, and one line saying why the walk chose it.
+
+Archive: **873 tracks · 7667 links · 12 genres** (playlists #1–#39 + 1 extra, updated 2026-07-26).
+
+---
+
+## What it is
+
+- **A walk, not a playlist.** The engine holds a cursor and a lookahead of two
+  tracks. It never materialises a list, so the stream is infinite by
+  construction and every step can react to what you just heard (and to what you
+  skipped).
+- **Rules, in one file.** Which track comes next is decided by *constraints*
+  (hard: no repeats, artist spacing) and *scorers* (soft: graph affinity, genre
+  inertia, mood and tempo continuity, freshness…), all in
+  [`src/core/rules.js`](src/core/rules.js). The real rule set is the next piece
+  of work — this is the scaffolding it plugs into. See
+  [`docs/RULES.md`](docs/RULES.md).
+- **Provider-agnostic playback.** Spotify is an implementation, not an
+  assumption. Everything above `src/providers/` deals in archive tracks and one
+  playback contract, so a second platform is a new folder and a line in a
+  registry. See [`docs/PROVIDERS.md`](docs/PROVIDERS.md).
+- **Minimalist.** One screen, one accent colour (the genre of the track), three
+  buttons. Everything else lives behind one chip.
+
+```
+   core/graph.js      the archive: nodes, links, neighbours
+   core/rules.js      constraints + scorers          ← the rules live here
+   core/walker.js     the endless walk, one step at a time
+        │
+   radio/useRadio.js  the engine: walk ⇄ player
+        │
+   providers/         Spotify Connect · Spotify preview · Dry run
+        │
+   ui/                cover, two lines, three buttons
+```
+
+---
+
+## Quick start
+
+```bash
+npm install
+npm run dev          # http://localhost:5173/new-release-radio/
+```
+
+The archive is fetched from the live Atlas at runtime, with the copy in
+`public/graph.json` as the offline fallback — so the radio works with no setup,
+and follows the Atlas as new playlists land there.
+
+Watch the rules work without a browser or an account:
+
+```bash
+node scripts/walk.mjs -n 40                 # 40 steps of the default station
+node scripts/walk.mjs -n 200 --preset drift --explain
+node scripts/walk.mjs -n 500 --stats-only   # repeats, artist spread, genre runs
+```
+
+Same seed + same preset + same archive = the same walk, every time.
+
+### Production build
+
+```bash
+npm run build     # dist/
+npm run preview   # serve dist/ for a realistic check
+```
+
+> The app reads `graph.json` over `fetch`, so it needs a server (dev, preview,
+> or Pages). Opening `dist/index.html` from the file system will not work.
+
+---
+
+## Listening
+
+Three players ship, picked from the provider registry:
+
+| player | what you hear | needs |
+| --- | --- | --- |
+| **Spotify preview** (default) | 30 s previews, advanced automatically | nothing |
+| **Spotify Connect** | **whole tracks**, on your own Spotify device | Premium login |
+| **Dry run** | nothing — a silent walk at up to 120× | nothing |
+
+**Spotify Connect is the real radio.** Playback is started once on the seed
+track and every track the walk decides is appended to Spotify's own queue
+(`POST /me/player/queue`), so the stream never stops, never restarts, and no
+playlist is ever created. The app is a remote control: the audio comes out of
+Spotify on the device you choose.
+
+It also works the other way round — if you change track yourself in Spotify, the
+walk **moves onto that track** and carries on from there instead of fighting you.
+
+**Dry run** is for developing the rules: covers and captions run past at speed
+with no streaming account and no network, and it is the proof that the provider
+seam is real.
+
+### Spotify setup (Connect only)
+
+Login is OAuth **Authorization Code + PKCE**, entirely client-side — no secret in
+the bundle, no backend. The redirect URI is computed as
+`window.location.origin + BASE_URL`, so **every deployment's URL must be
+registered** in the Spotify app dashboard:
+
+```
+https://marcomauro.github.io/new-release-radio/     # production
+http://localhost:5173/new-release-radio/            # local dev
+```
+
+The client id lives in [`src/providers/spotify/auth.js`](src/providers/spotify/auth.js)
+and can be overridden at build time with `VITE_SPOTIFY_CLIENT_ID`.
+Without the redirect registered, the previews still work: only Connect needs it.
+
+### Cover art
+
+`graph.json` is metadata only, so covers are resolved per track and cached in
+`localStorage`:
+
+- **connected** → `GET /tracks?ids=…`, batched, album art at full size;
+- **anonymous** → the public **oEmbed** endpoint (no token, no scope), asking
+  optimistically for the 640 px variant of the returned thumbnail;
+- **neither** → a placeholder tinted with the track's genre colour, showing the
+  artist's initials. The screen is never empty and never shows a broken image.
+
+---
+
+## Keyboard
+
+| key | |
+| --- | --- |
+| `space` | play / pause |
+| `→` | next track (the walk moves on, and remembers the skip) |
+| `s` | open / close the panel |
+
+---
+
+## Data
+
+The radio does not own any data. It reads the `graph.json` published by New
+Release Atlas — the same compact "format 2" the map uses: nodes are tracks,
+links carry their components `c = [artist, primary, secondary, playlist]` so the
+walk can tell *why* two tracks are connected, and `meta.linkWeights` gives the
+default weight of each kind of link.
+
+```bash
+python3 scripts/sync_graph.py                    # sibling checkout, else the live URL
+python3 scripts/sync_graph.py --from ../new-release-atlas/public/graph.json
+python3 scripts/sync_graph.py --check            # validate the snapshot (CI does this)
+```
+
+`sync_graph.py` is standard-library only, validates before writing, keeps a
+`.bak`, and updates the `Archive:` line in this README so the numbers never drift
+from the data. CI refreshes the snapshot on every deploy and weekly, so the
+offline copy does not go stale on its own.
+
+To add tracks, add a playlist **to the Atlas** — the radio picks it up on the
+next load.
+
+---
+
+## Install as an app (PWA)
+
+Installable on desktop and mobile, and the walk keeps working offline (playback
+obviously still needs the network). A service worker precaches the app shell and
+the archive snapshot; cover art is cached separately, cache-first.
+
+---
+
+## Deploy to GitHub Pages
+
+Every push to `main` builds and publishes `dist/` via
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml), which also
+refreshes the archive snapshot, validates it, and runs a 120-step walk as a
+smoke test.
+
+### Note on `base` (critical)
+
+Pages serves project sites from `/<repo-name>/`. In
+[`vite.config.js`](vite.config.js), `base` **must** equal the repository name:
+
+```js
+const base = '/new-release-radio/'
+```
+
+Rename the repo and this has to follow, or production goes blank: the archive
+fallback path, the PWA scope and the Spotify redirect URI all derive from it.
+
+### First-time setup
+
+1. create the empty `new-release-radio` repository on GitHub;
+2. push this project to `main`;
+3. **Settings → Pages → Source: GitHub Actions**;
+4. register the Pages URL as a Spotify redirect URI (see above) if you want
+   Connect.
+
+---
+
+## Project structure
+
+```
+new-release-radio/
+├── .github/workflows/deploy.yml   # build + deploy to Pages
+├── docs/
+│   ├── ARCHITECTURE.md            # how the pieces fit, and why
+│   ├── RULES.md                   # the rule contract — read before editing rules
+│   └── PROVIDERS.md               # how to add a streaming platform
+├── public/graph.json              # vendored archive snapshot (fallback / offline)
+├── scripts/
+│   ├── sync_graph.py              # refresh + validate the snapshot
+│   └── walk.mjs                   # run the walk in the terminal
+├── src/
+│   ├── core/
+│   │   ├── graph.js               # load + hydrate + index the archive
+│   │   ├── rules.js               # CONSTRAINTS + SCORERS + presets
+│   │   └── walker.js              # the station: one step at a time
+│   ├── providers/
+│   │   ├── provider.js            # the playback contract (CAPS, Snapshot)
+│   │   ├── index.js               # the registry
+│   │   ├── simulated.js           # dry run: the radio with the sound off
+│   │   └── spotify/               # auth (PKCE) · api · connect · embed · artwork
+│   ├── radio/useRadio.js          # the engine: walk ⇄ player
+│   ├── ui/                        # Cover · Controls · Panel
+│   ├── App.jsx · theme.js · index.css
+└── vite.config.js
+```
+
+---
+
+## Where this goes next
+
+- **The real rules.** Everything in `rules.js` today is a working default, not
+  the final answer: time of day, energy arcs across an hour, key/harmonic
+  transitions, "never two remixes in a row", listening history across sessions.
+  The engine, the UI and the players should not need to change for any of them.
+- **A second platform.** The contract in `docs/PROVIDERS.md` exists so the
+  archive can outlive Spotify. The Dry-run provider is there to keep that path
+  honest.
+- **Sharing a station.** A walk is reproducible from `(seed, preset, archive)`,
+  so a station is a URL: `?seed=<track-id>&preset=drift`.
+
+---
+
+## Related
+
+- **[New Release Atlas](https://github.com/marcomauro/new-release-atlas)** — the
+  map, the archive and the data pipeline this radio walks. Genre colours and link
+  weights are deliberately the same, so a track keeps its identity between the
+  two projects.

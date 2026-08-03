@@ -1,0 +1,76 @@
+name: Deploy to GitHub Pages
+
+# Every push to main: refresh the vendored archive snapshot from the live Atlas
+# (best effort — the committed copy is a valid fallback), build, publish.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  # The archive changes when a new playlist lands in New Release Atlas; a weekly
+  # rebuild keeps the offline snapshot from going stale on its own.
+  schedule:
+    - cron: '17 6 * * 1'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # Pull the current archive from the Atlas deploy. If it fails (Atlas down,
+      # network), the snapshot already in the repo is used and the build goes on:
+      # the app fetches the live archive at runtime anyway.
+      - name: Refresh archive snapshot
+        continue-on-error: true
+        run: python scripts/sync_graph.py --url https://marcomauro.github.io/new-release-atlas/graph.json --no-readme
+
+      # The snapshot must be a valid archive before it ships, refreshed or not.
+      - name: Validate archive snapshot
+        run: python scripts/sync_graph.py --check --no-readme
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      # The walk must still walk: 120 steps over the shipped archive, no deps.
+      - name: Walk smoke test
+        run: node scripts/walk.mjs -n 120 --stats-only
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,23 @@
+{
+  "name": "new-release-radio",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Endless radio over the New Release Atlas archive: a rule-driven graph walk turns the music map into a continuous listening session.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "sync": "python3 scripts/sync_graph.py",
+    "walk": "node scripts/walk.mjs"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.0.0",
+    "vite-plugin-pwa": "^1.3.0"
+  }
+}

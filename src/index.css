@@ -1,0 +1,606 @@
+/* ----------------------------------------------------------------------------
+   Minimalist by construction: one screen, one cover, one line of type.
+   Everything that is not the music is grey, small, and out of the way.
+   --genre is set per track from the archive palette and is the only colour.
+   -------------------------------------------------------------------------- */
+
+:root {
+  --bg: #0d0d0f;
+  --ink: #f2efe9;
+  --muted: #8b867f;
+  --dim: #55524d;
+  --line: rgba(242, 239, 233, 0.12);
+  --genre: #b8b0a4;
+  --cover: min(58vh, 420px);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+input {
+  font: inherit;
+}
+
+/* --- shell --------------------------------------------------------------- */
+
+.screen {
+  position: relative;
+  height: 100%;
+  overflow: hidden; /* the ambient layer is deliberately oversized */
+  display: flex;
+  flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+}
+
+/* The cover, blurred to nothing: the only thing that tints the room. */
+.ambient {
+  position: absolute;
+  inset: -20%;
+  background-size: cover;
+  background-position: center;
+  filter: blur(80px) saturate(1.4);
+  opacity: 0.22;
+  transform: scale(1.2);
+  transition: opacity 1.2s ease, background-image 0.6s ease;
+  pointer-events: none;
+}
+
+.ambient::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(60% 60% at 50% 45%, transparent, var(--bg) 85%);
+}
+
+.topbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  flex: 0 0 auto;
+}
+
+.wordmark {
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.chip {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  white-space: nowrap;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.chip:hover {
+  color: var(--ink);
+  border-color: rgba(242, 239, 233, 0.3);
+}
+
+.chip.on {
+  color: var(--bg);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.chip.accent {
+  color: var(--genre);
+  border-color: color-mix(in srgb, var(--genre) 45%, transparent);
+}
+
+/* --- now playing --------------------------------------------------------- */
+
+.stage {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 26px;
+  padding: 8px 20px 20px;
+  min-height: 0;
+}
+
+.cover {
+  position: relative;
+  width: var(--cover);
+  aspect-ratio: 1;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #17171a;
+  box-shadow: 0 30px 70px -20px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  flex: 0 1 auto;
+  max-height: 58vh;
+  transition: transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1), opacity 0.4s;
+}
+
+.cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cover.idle {
+  transform: scale(0.985);
+  opacity: 0.85;
+}
+
+/* Placeholder while the cover resolves: the genre colour and the initials. */
+.cover .fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: ui-serif, Georgia, 'Times New Roman', serif;
+  font-size: calc(var(--cover) / 5);
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.62);
+  background: linear-gradient(
+    150deg,
+    color-mix(in srgb, var(--genre) 55%, #111),
+    color-mix(in srgb, var(--genre) 12%, #111)
+  );
+}
+
+.cover .veil {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(8, 8, 10, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.bigplay {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  display: grid;
+  place-items: center;
+  font-size: 24px;
+  padding-left: 5px;
+  color: #fff;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.bigplay:hover {
+  transform: scale(1.06);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.meta {
+  width: var(--cover);
+  max-width: 100%;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex: 0 0 auto;
+}
+
+.title {
+  font-family: ui-serif, Georgia, 'Times New Roman', serif;
+  font-size: 22px;
+  line-height: 1.25;
+  letter-spacing: 0.005em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.artist {
+  font-size: 13px;
+  color: var(--muted);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.why {
+  font-size: 11px;
+  color: var(--dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 15px;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--genre);
+  flex: 0 0 auto;
+}
+
+/* --- progress + controls ------------------------------------------------- */
+
+.bar {
+  width: var(--cover);
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 10.5px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.track {
+  position: relative;
+  flex: 1;
+  height: 20px;
+  display: flex;
+  align-items: center;
+}
+
+.track .rail {
+  width: 100%;
+  height: 2px;
+  background: var(--line);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.track .fill {
+  height: 100%;
+  background: var(--genre);
+  transition: width 0.4s linear;
+}
+
+.track.seekable {
+  cursor: pointer;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 30px;
+  flex: 0 0 auto;
+}
+
+.ctl {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  transition: color 0.2s, background 0.2s;
+}
+
+.ctl:hover {
+  color: var(--ink);
+  background: rgba(242, 239, 233, 0.07);
+}
+
+.ctl.main {
+  width: 54px;
+  height: 54px;
+  border: 1px solid var(--line);
+  color: var(--ink);
+}
+
+.ctl svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.ctl.main svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* --- footer: what comes next -------------------------------------------- */
+
+.footer {
+  flex: 0 0 auto;
+  padding: 12px 18px calc(14px + env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11.5px;
+  color: var(--dim);
+  border-top: 1px solid rgba(242, 239, 233, 0.06);
+  min-height: 44px;
+}
+
+.footer .label {
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 9.5px;
+  color: var(--dim);
+  flex: 0 0 auto;
+}
+
+.footer .next {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  text-align: left;
+}
+
+.footer .next:hover {
+  color: var(--ink);
+}
+
+.notice {
+  font-size: 11px;
+  color: #d9a05b;
+  text-align: center;
+  padding: 0 18px 6px;
+  min-height: 14px;
+}
+
+/* The Spotify preview iframe: present because it is what plays the audio,
+   deliberately quiet in the layout. */
+.embed {
+  width: min(var(--cover), 100%);
+  margin: 0 auto;
+  border-radius: 6px;
+  overflow: hidden;
+  opacity: 0.55;
+  transition: opacity 0.3s;
+}
+
+.embed:hover {
+  opacity: 1;
+}
+
+.embed.hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  left: -9999px;
+}
+
+/* --- panel --------------------------------------------------------------- */
+
+.panel {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 8, 10, 0.88);
+  backdrop-filter: blur(18px);
+  z-index: 10;
+  overflow-y: auto;
+  animation: fade 0.22s ease;
+}
+
+.panel > * {
+  max-width: 620px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 18px;
+  padding-right: 18px;
+}
+
+.panel > .head {
+  padding-top: 16px;
+}
+
+.panel > :last-child {
+  padding-bottom: calc(32px + env(safe-area-inset-bottom));
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.panel h2 {
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 400;
+  /* margin-left/right stay auto (see `.panel > *`) so headings line up with
+     the content column instead of hugging the window edge. */
+  margin-top: 24px;
+  margin-bottom: 10px;
+}
+
+.panel h2:first-of-type {
+  margin-top: 12px;
+}
+
+.panel .head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.opt {
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 9px 12px;
+  text-align: left;
+  flex: 1 1 150px;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.opt:hover {
+  border-color: rgba(242, 239, 233, 0.28);
+}
+
+.opt.on {
+  border-color: var(--genre);
+  background: color-mix(in srgb, var(--genre) 10%, transparent);
+}
+
+.opt .name {
+  font-size: 12.5px;
+}
+
+.opt .sub {
+  font-size: 10.5px;
+  color: var(--dim);
+  margin-top: 3px;
+}
+
+.slider {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  align-items: center;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(242, 239, 233, 0.05);
+}
+
+.slider .name {
+  font-size: 12px;
+}
+
+.slider .val {
+  font-size: 10.5px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.slider .desc {
+  grid-column: 1 / -1;
+  font-size: 10.5px;
+  color: var(--dim);
+  line-height: 1.45;
+}
+
+.slider input[type='range'] {
+  grid-column: 1 / -1;
+  width: 100%;
+  accent-color: var(--genre);
+  height: 18px;
+}
+
+.search {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  padding: 9px 2px;
+  outline: none;
+}
+
+.search:focus {
+  border-color: var(--genre);
+}
+
+.hit {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 2px;
+  border-bottom: 1px solid rgba(242, 239, 233, 0.05);
+  font-size: 12.5px;
+}
+
+.hit span {
+  color: var(--dim);
+}
+
+.hit:hover {
+  color: var(--genre);
+}
+
+.info {
+  font-size: 11px;
+  color: var(--dim);
+  line-height: 1.6;
+}
+
+.info a {
+  color: var(--muted);
+}
+
+/* --- centred states ----------------------------------------------------- */
+
+.center {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 24px;
+  color: var(--muted);
+  font-size: 12.5px;
+  letter-spacing: 0.04em;
+}
+
+@media (max-width: 560px) {
+  :root {
+    --cover: min(48vh, 340px);
+  }
+  .stage {
+    gap: 18px;
+  }
+  .title {
+    font-size: 19px;
+  }
+  .controls {
+    gap: 24px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
