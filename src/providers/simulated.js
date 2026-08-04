@@ -22,6 +22,7 @@ export function createSimulatedProvider({ speed = 8 } = {}) {
   let playing = false
   let ended = null
   let rate = speed
+  let vol = 70 // nothing to hear, but the control has to be exercisable
 
   const now = () => Date.now()
   const elapsed = () => (playing ? (now() - startedAt) * rate : pausedAt)
@@ -30,7 +31,7 @@ export function createSimulatedProvider({ speed = 8 } = {}) {
     id: 'simulated',
     label: 'Dry run',
     blurb: `silent walk at ${speed}× · for tuning the rules`,
-    caps: new Set([CAPS.SILENT, CAPS.ARTWORK, CAPS.SEEK]),
+    caps: new Set([CAPS.SILENT, CAPS.ARTWORK, CAPS.SEEK, CAPS.VOLUME]),
 
     async init() {},
     status() {
@@ -74,6 +75,10 @@ export function createSimulatedProvider({ speed = 8 } = {}) {
       if (playing) startedAt = now() - pausedAt / rate
     },
 
+    async setVolume(percent) {
+      vol = Math.max(0, Math.min(100, Math.round(percent)))
+    },
+
     async poll() {
       const pos = Math.min(elapsed(), duration)
       if (playing && duration > 0 && pos >= duration && ended !== ref) ended = ref
@@ -82,7 +87,15 @@ export function createSimulatedProvider({ speed = 8 } = {}) {
         ended = null
         playing = false
       }
-      return makeSnapshot({ playing, position: pos, duration, ref, endedRef })
+      return makeSnapshot({
+        playing,
+        position: pos,
+        duration,
+        ref,
+        endedRef,
+        volume: vol,
+        volumeAvailable: true,
+      })
     },
 
     artwork(track) {

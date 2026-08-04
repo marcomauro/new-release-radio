@@ -10,6 +10,11 @@
    `POST /me/player/queue`. Spotify keeps playing without interruption, and the
    radio learns what is on air by polling `/me/player`. No playlist is ever
    created, nothing is ever restarted.
+
+   Two things this provider is careful about:
+   • an ALREADY RUNNING Spotify session is something to join, not to interrupt —
+     `poll()` reports it and the engine adopts it (see radio/useRadio.js);
+   • `start()` never restarts a track that is already the one on air.
    -------------------------------------------------------------------------- */
 
 import * as api from './api.js'
@@ -19,28 +24,56 @@ import { CAPS, makeSnapshot } from '../provider.js'
 
 const refOf = (track) => (track && track.id ? `spotify:track:${track.id}` : null)
 
+// Spotify device types -> the short word the UI shows under the name.
+const KIND = {
+  Computer: 'computer',
+  Smartphone: 'phone',
+  Tablet: 'tablet',
+  Speaker: 'speaker',
+  TV: 'tv',
+  AVR: 'amplifier',
+  STB: 'set-top box',
+  CastVideo: 'cast',
+  CastAudio: 'cast',
+  Automobile: 'car',
+  GameConsole: 'console',
+}
+
 export function createConnectProvider() {
-  let device = null // { id, name, type }
+  let device = null // { id, name, type, volume, supportsVolume }
   let devices = []
   let userPicked = false
   let authError = false
   let message = ''
   let started = false
+  let lastRef = null // what Spotify last told us is on air
 
   const isMobile = () =>
     typeof navigator !== 'undefined' && /iphone|ipad|android/i.test(navigator.userAgent)
 
+  const asDevice = (d) =>
+    d && {
+      id: d.id,
+      name: d.name,
+      type: d.type,
+      kind: KIND[d.type] || (d.type || '').toLowerCase(),
+      active: !!d.is_active,
+      volume: typeof d.volume_percent === 'number' ? d.volume_percent : null,
+      supportsVolume: d.supports_volume !== false,
+    }
+
   async function refreshDevices() {
     try {
-      devices = await api.devices()
+      devices = (await api.devices()).map(asDevice).filter(Boolean)
       authError = false
-      if (!userPicked) {
-        const active = devices.find((d) => d.is_active)
+      if (!userPicked || !devices.some((d) => d.id === (device && device.id))) {
+        const active = devices.find((d) => d.active)
         const phone = devices.find((d) => d.type === 'Smartphone')
-        const chosen = active || (isMobile() && phone) || devices[0] || null
-        device = chosen ? { id: chosen.id, name: chosen.name, type: chosen.type } : null
+        device = active || (isMobile() && phone) || devices[0] || null
       }
-      message = devices.length ? '' : 'no active device — open Spotify anywhere, then press play'
+      message = devices.length
+        ? ''
+        : 'no Spotify device found — open Spotify on any device, then press play'
       return devices
     } catch (e) {
       if (e && e.status === 401) authError = true
@@ -80,7 +113,15 @@ export function createConnectProvider() {
     id: 'spotify-connect',
     label: 'Spotify Connect',
     blurb: 'full tracks on your Spotify device · Premium',
-    caps: new Set([CAPS.FULL, CAPS.REMOTE, CAPS.QUEUE, CAPS.ARTWORK, CAPS.SEEK]),
+    caps: new Set([
+      CAPS.FULL,
+      CAPS.REMOTE,
+      CAPS.QUEUE,
+      CAPS.ARTWORK,
+      CAPS.SEEK,
+      CAPS.VOLUME,
+      CAPS.OUTPUTS,
+    ]),
 
     async init() {
       if (isLoggedIn()) await refreshDevices()
@@ -102,6 +143,7 @@ export function createConnectProvider() {
       started = false
       device = null
       devices = []
+      lastRef = null
     },
 
     async resolve(track) {
@@ -115,10 +157,20 @@ export function createConnectProvider() {
     async start(track) {
       const uri = refOf(track)
       if (!uri) return
+      // Already on air: joining a running session must not restart it.
+      if (uri === lastRef && started) {
+        try {
+          await api.resume()
+          return
+        } catch (e) {
+          /* fall through to a normal start */
+        }
+      }
       await ensureDevice()
       try {
         await api.play([uri], device ? device.id : undefined)
         started = true
+        lastRef = uri
         message = ''
       } catch (e) {
         // A silent device usually just needs the transfer first.
@@ -127,6 +179,7 @@ export function createConnectProvider() {
             await api.transfer(device.id, false)
             await api.play([uri], device.id)
             started = true
+            lastRef = uri
             message = ''
             return
           } catch (e2) {
@@ -136,6 +189,13 @@ export function createConnectProvider() {
         }
         handleError(e)
       }
+    },
+
+    /** Adopt whatever is already playing: no command sent, just bookkeeping. */
+    adopt(ref) {
+      started = true
+      lastRef = ref
+      message = ''
     },
 
     async enqueue(track) {
@@ -185,22 +245,78 @@ export function createConnectProvider() {
       }
     },
 
+    /** 0–100. Spotify applies it to the active device. */
+    async setVolume(percent) {
+      const v = Math.max(0, Math.min(100, Math.round(percent)))
+      if (device) device = { ...device, volume: v }
+      try {
+        await api.volume(v, device ? device.id : undefined)
+      } catch (e) {
+        // Devices that cannot be volumed report 403 — say so once, quietly.
+        if (e && e.status === 403) message = 'this device does not accept remote volume'
+        else handleError(e)
+      }
+    },
+
+    /* --- outputs (Spotify devices) ---------------------------------------- */
+
+    async listOutputs() {
+      return refreshDevices()
+    },
+
+    outputs() {
+      return devices
+    },
+
+    currentOutput() {
+      return device
+    },
+
+    async selectOutput(id) {
+      const d = devices.find((x) => x.id === id)
+      if (!d) return
+      userPicked = true
+      device = d
+      try {
+        // `play: true` moves the stream to the new device without a gap.
+        await api.transfer(d.id, true)
+        message = ''
+      } catch (e) {
+        handleError(e)
+      }
+    },
+
     async poll() {
       try {
         const s = await api.state()
         authError = false
+        if (s && s.device) {
+          const d = asDevice(s.device)
+          if (d) {
+            device = d
+            const i = devices.findIndex((x) => x.id === d.id)
+            if (i >= 0) devices[i] = d
+          }
+        }
         if (!s || !s.item) {
-          return makeSnapshot({ message: message || (started ? '' : 'ready'), playing: false })
+          return makeSnapshot({
+            playing: false,
+            message: message || (started ? '' : 'ready'),
+            volume: device ? device.volume : null,
+            volumeAvailable: !!(device && device.supportsVolume),
+          })
         }
         const imgs = (s.item.album && s.item.album.images) || []
-        if (s.device) device = { id: s.device.id, name: s.device.name, type: s.device.type }
+        lastRef = `spotify:track:${s.item.id}`
         return makeSnapshot({
           playing: !!s.is_playing,
           position: s.progress_ms || 0,
           duration: s.item.duration_ms || 0,
-          ref: `spotify:track:${s.item.id}`,
+          ref: lastRef,
           artwork: imgs.length ? { url: imgs[0].url, fallback: imgs[imgs.length - 1].url } : null,
           message,
+          volume: device ? device.volume : null,
+          volumeAvailable: !!(device && device.supportsVolume),
         })
       } catch (e) {
         if (e && e.status === 401) {
@@ -218,30 +334,6 @@ export function createConnectProvider() {
 
     teardown() {
       started = false
-    },
-
-    // Provider-specific extras: the device row in the UI. Anything outside the
-    // contract lives here, so the shared code never depends on it.
-    extras: {
-      listDevices: refreshDevices,
-      get devices() {
-        return devices
-      },
-      get device() {
-        return device
-      },
-      async select(id) {
-        userPicked = true
-        const d = devices.find((x) => x.id === id)
-        if (!d) return
-        device = { id: d.id, name: d.name, type: d.type }
-        try {
-          await api.transfer(d.id, true)
-          message = ''
-        } catch (e) {
-          handleError(e)
-        }
-      },
     },
   }
 }

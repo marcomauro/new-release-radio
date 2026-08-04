@@ -3,8 +3,8 @@
 
    The only file that knows which platforms exist. Adding one means writing a
    module that satisfies the contract in provider.js and listing it here; the
-   radio picks it up (provider switch, capabilities, artwork) with no other
-   change. See docs/PROVIDERS.md.
+   radio picks it up (provider switch, capabilities, artwork, volume, outputs)
+   with no other change. See docs/PROVIDERS.md.
    -------------------------------------------------------------------------- */
 
 import { createConnectProvider } from './spotify/connect.js'
@@ -20,18 +20,34 @@ export function createProviders() {
 }
 
 /**
- * Which provider should run on load: Connect when the user is already logged in
- * (full tracks are always the better radio), previews otherwise. `?player=<id>`
- * or a remembered choice win over both.
+ * Which provider runs on load.
+ *
+ * The rule that matters: **a live Spotify session outranks habit.** If there is
+ * a token, the radio remote-controls Spotify and plays whole tracks; it must not
+ * fall back to 30-second previews just because previews are what played last
+ * time. That was a real bug — the remembered id was consulted before the login
+ * state, so connecting Spotify left the radio on previews until you switched the
+ * player by hand.
+ *
+ * Only two things outrank a live session:
+ *   • `?player=<id>` in the URL — an explicit, per-visit instruction;
+ *   • a provider the user picked BY HAND in the panel (`providerPinned`), because
+ *     that is a decision rather than a leftover. Auto-selection never pins.
+ *
+ * @param {object[]} providers
+ * @param {{providerId?: string, providerPinned?: boolean}} [saved] last session
  */
-export function preferredProviderId(providers, remembered) {
+export function preferredProviderId(providers, saved) {
+  const has = (id) => providers.some((p) => p.id === id)
   const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
   const asked = params && params.get('player')
-  const has = (id) => providers.some((p) => p.id === id)
   if (asked && has(asked)) return asked
-  if (remembered && has(remembered)) {
-    // never resume into Connect after a logout
-    if (remembered !== 'spotify-connect' || isLoggedIn()) return remembered
+
+  const loggedIn = isLoggedIn()
+  const remembered = saved && saved.providerId
+  if (saved && saved.providerPinned && has(remembered)) {
+    // never resume into Connect without a token
+    if (remembered !== 'spotify-connect' || loggedIn) return remembered
   }
-  return isLoggedIn() ? 'spotify-connect' : 'spotify-embed'
+  return loggedIn ? 'spotify-connect' : 'spotify-embed'
 }

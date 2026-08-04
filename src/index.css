@@ -127,6 +127,93 @@ input {
   border-color: color-mix(in srgb, var(--genre) 45%, transparent);
 }
 
+/* --- output pill: where the sound comes out ------------------------------ */
+
+.pill-wrap {
+  position: relative;
+  display: flex;
+}
+
+.chip.out {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 42vw;
+}
+
+.chip.out .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip.out .caret {
+  font-size: 8px;
+  opacity: 0.7;
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  min-width: 220px;
+  max-width: min(320px, 86vw);
+  padding: 4px;
+  background: rgba(18, 18, 21, 0.97);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 18px 40px -12px rgba(0, 0, 0, 0.8);
+  animation: fade 0.14s ease;
+}
+
+.menu .row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.menu .row:hover {
+  background: rgba(242, 239, 233, 0.07);
+}
+
+.menu .row.on {
+  background: color-mix(in srgb, var(--genre) 16%, transparent);
+}
+
+.menu .row .n {
+  display: block;
+  font-size: 12.5px;
+}
+
+.menu .row .k {
+  display: block;
+  font-size: 10.5px;
+  color: var(--dim);
+  margin-top: 2px;
+}
+
+.menu .row.refresh {
+  border-top: 1px solid rgba(242, 239, 233, 0.06);
+  border-radius: 0 0 4px 4px;
+  margin-top: 2px;
+}
+
+.menu .row.refresh .n {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.menu .empty {
+  padding: 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--dim);
+}
+
 /* --- now playing --------------------------------------------------------- */
 
 .stage {
@@ -297,12 +384,106 @@ input {
   cursor: pointer;
 }
 
+/* The transport stays optically centred under the cover; the volume rides at
+   the right edge of the same column, so adding it moved nothing. */
 .controls {
+  position: relative;
+  width: var(--cover);
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.transport {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 30px;
-  flex: 0 0 auto;
+}
+
+.volume {
+  position: absolute;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0.75;
+  transition: opacity 0.2s;
+}
+
+.volume:hover {
+  opacity: 1;
+}
+
+.volume.off {
+  opacity: 0.3;
+}
+
+.volume .spk {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.volume .spk:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.volume .spk:disabled {
+  cursor: default;
+}
+
+.volume .spk svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+}
+
+.volume input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 64px;
+  height: 14px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.volume input[type='range']:disabled {
+  cursor: default;
+}
+
+.volume input[type='range']::-webkit-slider-runnable-track {
+  height: 2px;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+.volume input[type='range']::-moz-range-track {
+  height: 2px;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+.volume input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--genre);
+  margin-top: -3.5px;
+}
+
+.volume input[type='range']::-moz-range-thumb {
+  width: 9px;
+  height: 9px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--genre);
 }
 
 .ctl {
@@ -382,28 +563,20 @@ input {
   min-height: 14px;
 }
 
-/* The Spotify preview iframe: present because it is what plays the audio,
-   deliberately quiet in the layout. */
+/* The Spotify preview iframe. It is what decodes the audio, so it stays in the
+   page and at a normal size — a 1px or display:none iframe risks the embed
+   never initialising — but it is invisible and inert: the interface has one
+   player, ours, and this is only its engine. */
 .embed {
-  width: min(var(--cover), 100%);
-  margin: 0 auto;
-  border-radius: 6px;
-  overflow: hidden;
-  opacity: 0.55;
-  transition: opacity 0.3s;
-}
-
-.embed:hover {
-  opacity: 1;
-}
-
-.embed.hidden {
   position: absolute;
-  width: 1px;
-  height: 1px;
+  bottom: 0;
+  left: 50%;
+  width: 300px;
+  height: 80px;
+  transform: translateX(-50%);
   opacity: 0;
   pointer-events: none;
-  left: -9999px;
+  z-index: -1;
 }
 
 /* --- panel --------------------------------------------------------------- */
@@ -593,8 +766,22 @@ input {
   .title {
     font-size: 19px;
   }
-  .controls {
-    gap: 24px;
+  .transport {
+    gap: 22px;
+  }
+  /* Narrow screens: the slider shrinks to the icon plus a hint of track, and
+     the transport keeps the middle of the screen. */
+  .volume input[type='range'] {
+    width: 40px;
+  }
+  .chip.out {
+    max-width: 34vw;
+  }
+}
+
+@media (max-width: 380px) {
+  .volume input[type='range'] {
+    display: none;
   }
 }
 

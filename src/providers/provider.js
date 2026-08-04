@@ -19,16 +19,21 @@
      resolve(track)              → platform ref for an archive track, or null
      trackIdFromRef(ref)         → archive id for a platform ref, or null
      start(track)                → play this track now
+     adopt(ref)                  → optional: take over a session already playing
      enqueue(track)              → append after the current one (CAPS.QUEUE)
      skip()                      → optional: platform-native "next" (CAPS.QUEUE)
      pause() / resume() / seek(ms)
+     setVolume(0..100)           → CAPS.VOLUME
+     listOutputs() / outputs() / currentOutput() / selectOutput(id)
+                                 → CAPS.OUTPUTS: where the audio comes out
      poll()                      → Snapshot, the single source of playback truth
      artwork(track)              → { url, fallback } or null
      teardown()
      extras                      → anything platform-specific (device picker …)
 
    Snapshot (everything optional except `playing`):
-     { playing, position, duration, ref, endedRef, artwork, message, authError }
+     { playing, position, duration, ref, endedRef, artwork, message, authError,
+       volume, volumeAvailable }
 
    `poll()` is how the radio learns that a track finished: useRadio compares
    `ref` with what it asked for and advances the walk. A provider that pushes
@@ -45,6 +50,8 @@ export const CAPS = {
   QUEUE: 'queue', // can append the next track without restarting playback
   ARTWORK: 'artwork', // can resolve cover art
   SEEK: 'seek',
+  VOLUME: 'volume', // can set the playback volume
+  OUTPUTS: 'outputs', // can list and switch the device the audio comes out of
   SILENT: 'silent', // no audio at all (rule development)
 }
 
@@ -58,6 +65,8 @@ export function makeSnapshot(partial = {}) {
     artwork: null,
     message: '',
     authError: false,
+    volume: null,
+    volumeAvailable: false,
     ...partial,
   }
 }

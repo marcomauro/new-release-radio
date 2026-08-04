@@ -33,7 +33,7 @@ export default function Panel({ radio, onClose }) {
   const hits = useMemo(() => (index && q ? searchTracks(index, q, 10) : []), [index, q])
   const dur = useMemo(() => (index ? archiveDuration(index) : null), [index])
   const rs = radio.ruleset
-  const devices = radio.provider && radio.provider.extras ? radio.provider.extras.devices : null
+  const outputs = radio.outputs || []
 
   const patch = (part) => radio.setRuleset({ ...rs, ...part })
   const patchWeights = (id, v) => radio.setRuleset({ ...rs, weights: { ...rs.weights, [id]: v } })
@@ -182,37 +182,44 @@ export default function Panel({ radio, onClose }) {
             </>
           )}
 
-          {devices && devices.length > 0 && (
+          {radio.canChooseOutput && (
             <>
               <h2>Play on</h2>
               <div className="row">
-                {devices.map((d) => (
-                  <button
-                    key={d.id}
-                    className={`opt${
-                      radio.provider.extras.device && radio.provider.extras.device.id === d.id ? ' on' : ''
-                    }`}
-                    onClick={() => radio.provider.extras.select(d.id)}
-                  >
-                    <div className="name">{d.name}</div>
-                    <div className="sub">{d.type.toLowerCase()}</div>
-                  </button>
-                ))}
+                {outputs.length ? (
+                  outputs.map((o) => (
+                    <button
+                      key={o.id}
+                      className={`opt${
+                        radio.currentOutput && radio.currentOutput.id === o.id ? ' on' : ''
+                      }`}
+                      onClick={() => radio.selectOutput(o.id)}
+                    >
+                      <div className="name">{o.name}</div>
+                      <div className="sub">
+                        {o.kind}
+                        {o.active ? ' · active' : ''}
+                      </div>
+                    </button>
+                  ))
+                ) : (
+                  <p className="info">
+                    No device yet. Open Spotify on a phone, a desktop or a speaker and it appears
+                    here — the same list is one click away in the top bar.
+                  </p>
+                )}
               </div>
+              <p className="info" style={{ marginTop: 12 }}>
+                <button className="chip" onClick={() => radio.refreshOutputs()}>
+                  refresh devices
+                </button>{' '}
+                {radio.status.authenticated && (
+                  <button className="chip" onClick={() => radio.signOut()}>
+                    sign out
+                  </button>
+                )}
+              </p>
             </>
-          )}
-
-          {radio.provider && radio.provider.extras && radio.provider.extras.listDevices && (
-            <p className="info" style={{ marginTop: 12 }}>
-              <button className="chip" onClick={() => radio.provider.extras.listDevices()}>
-                refresh devices
-              </button>{' '}
-              {radio.provider.signOut && radio.status.authenticated && (
-                <button className="chip" onClick={() => radio.provider.signOut()}>
-                  sign out
-                </button>
-              )}
-            </p>
           )}
 
           {radio.provider && radio.provider.extras && radio.provider.extras.setSpeed && (

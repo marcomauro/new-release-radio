@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useRef } from 'react'
 import { fmtTime } from '../theme.js'
 
 const Play = () => (
@@ -14,6 +14,23 @@ const Pause = () => (
 const Next = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true">
     <path d="M6 5l9 7-9 7zM17 5h2v14h-2z" />
+  </svg>
+)
+const Shuffle = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M14 4h6v6h-2V7.4l-4.3 4.3-1.4-1.4L16.6 6H14zM4 17.6 9.6 12l1.4 1.4L5.4 19H4zM4 6.4 5.4 5l5.3 5.3-1.4 1.4zM18 16.6V14h2v6h-6v-2h2.6l-4.3-4.3 1.4-1.4z" />
+  </svg>
+)
+
+// Three speaker states: muted, quiet, loud — the icon is the readout.
+const Speaker = ({ level }) => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M4 9h3l4-3.5v13L7 15H4z" />
+    {level > 0 && <path d="M14.5 8.6a5 5 0 0 1 0 6.8l1.1 1.1a6.6 6.6 0 0 0 0-9z" />}
+    {level > 55 && <path d="M17.2 5.9a8.8 8.8 0 0 1 0 12.2l1.1 1.1a10.4 10.4 0 0 0 0-14.4z" />}
+    {level === 0 && (
+      <path d="M14.2 9.4l1.2-1.2 4.4 4.4-1.2 1.2z M18.6 9.4l1.2 1.2-4.4 4.4-1.2-1.2z" />
+    )}
   </svg>
 )
 
@@ -38,24 +55,80 @@ export function ProgressBar({ position, duration, seekable, onSeek }) {
   )
 }
 
-const Shuffle = () => (
-  <svg viewBox="0 0 24 24" aria-hidden="true">
-    <path d="M14 4h6v6h-2V7.4l-4.3 4.3-1.4-1.4L16.6 6H14zM4 17.6 9.6 12l1.4 1.4L5.4 19H4zM4 6.4 5.4 5l5.3 5.3-1.4 1.4zM18 16.6V14h2v6h-6v-2h2.6l-4.3-4.3 1.4-1.4z" />
-  </svg>
-)
+/**
+ * Volume for whatever is playing — on Connect it drives the real device volume.
+ * When the platform has no volume control at all (the Spotify preview embed does
+ * not), the slider stays visible but disabled and says why: a dead control is
+ * worse than an honest one.
+ */
+export function Volume({ value, available, onChange, unavailableReason }) {
+  const last = useRef(60)
+  const level = value == null ? 60 : value
+  const known = value != null
+  const toggleMute = () => {
+    if (!available) return
+    if (level > 0) {
+      last.current = level
+      onChange(0)
+    } else {
+      onChange(last.current || 60)
+    }
+  }
+  return (
+    <div
+      className={`volume${available ? '' : ' off'}`}
+      title={
+        available
+          ? `Volume ${known ? `${level}%` : ''} — click the speaker to mute`
+          : unavailableReason || 'volume is not available on this player'
+      }
+    >
+      <button className="spk" onClick={toggleMute} disabled={!available} aria-label="Mute">
+        <Speaker level={available && known ? level : 0} />
+      </button>
+      <input
+        type="range"
+        min="0"
+        max="100"
+        step="1"
+        value={level}
+        disabled={!available}
+        onChange={(e) => onChange(parseInt(e.target.value, 10))}
+        aria-label="Volume"
+      />
+    </div>
+  )
+}
 
-export default function Controls({ playing, onToggle, onNext, onReseed }) {
+export default function Controls({
+  playing,
+  onToggle,
+  onNext,
+  onReseed,
+  volume,
+  canSetVolume,
+  onVolume,
+  volumeReason,
+}) {
   return (
     <div className="controls">
-      <button className="ctl" onClick={onReseed} title="New station — start somewhere else">
-        <Shuffle />
-      </button>
-      <button className="ctl main" onClick={onToggle} title={playing ? 'Pause' : 'Play'}>
-        {playing ? <Pause /> : <Play />}
-      </button>
-      <button className="ctl" onClick={onNext} title="Next track — the walk moves on">
-        <Next />
-      </button>
+      <div className="transport">
+        <button className="ctl" onClick={onReseed} title="New station — start somewhere else">
+          <Shuffle />
+        </button>
+        <button className="ctl main" onClick={onToggle} title={playing ? 'Pause' : 'Play'}>
+          {playing ? <Pause /> : <Play />}
+        </button>
+        <button className="ctl" onClick={onNext} title="Next track — the walk moves on">
+          <Next />
+        </button>
+      </div>
+      <Volume
+        value={volume}
+        available={canSetVolume}
+        onChange={onVolume}
+        unavailableReason={volumeReason}
+      />
     </div>
   )
 }

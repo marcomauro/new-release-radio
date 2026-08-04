@@ -3,12 +3,18 @@ import { useRadio } from './radio/useRadio.js'
 import { CAPS } from './providers/index.js'
 import Cover from './ui/Cover.jsx'
 import Controls, { ProgressBar } from './ui/Controls.jsx'
+import OutputPill from './ui/OutputPill.jsx'
 import Panel from './ui/Panel.jsx'
 import { gColor, gLabel } from './theme.js'
 
 /* One screen: the cover of what is playing, the two lines that name it, the
-   reason the walk chose it, and three buttons. Everything else is behind the
-   station chip. */
+   reason the walk chose it, and one set of controls. Everything else is behind
+   a chip.
+
+   There is exactly ONE player on this page — ours. When previews are the source,
+   Spotify's iframe still does the decoding, but it lives off-screen and is
+   driven entirely by the controls below: two players competing for the same
+   screen was the bug this replaced. */
 
 export default function App() {
   const radio = useRadio()
@@ -69,12 +75,19 @@ export default function App() {
       <div className="topbar">
         <span className="wordmark">New Release Radio</span>
         <span className="spacer" />
-        <button className="chip accent" onClick={() => setPanel(true)}>
+        {radio.canChooseOutput && (
+          <OutputPill
+            outputs={radio.outputs}
+            current={radio.currentOutput}
+            onSelect={radio.selectOutput}
+            onRefresh={radio.refreshOutputs}
+          />
+        )}
+        <button className="chip accent" onClick={() => setPanel(true)} title="Station rules">
           {radio.ruleset.label}
         </button>
         <button className="chip" onClick={() => setPanel(true)} title={provider ? provider.blurb : ''}>
           {provider ? provider.label : '—'}
-          {radio.status.device ? ` · ${radio.status.device}` : ''}
         </button>
       </div>
 
@@ -110,22 +123,26 @@ export default function App() {
           onToggle={radio.toggle}
           onNext={radio.next}
           onReseed={() => radio.reseed()}
+          volume={radio.volume}
+          canSetVolume={radio.canSetVolume}
+          onVolume={radio.setVolume}
+          volumeReason={
+            isPreview
+              ? 'the Spotify preview player has no volume control — connect Spotify for full tracks and volume'
+              : 'this player does not expose a volume control'
+          }
         />
 
-        {/* Spotify plays the preview: the official player stays on screen, quiet. */}
-        {needsHost && <div ref={hostRef} className={`embed${isPreview ? '' : ' hidden'}`} />}
+        {/* Spotify decodes the preview; it is deliberately off-screen so the
+            page has a single player. Our controls drive it. */}
+        {needsHost && <div ref={hostRef} className="embed hidden" aria-hidden="true" />}
       </div>
 
       {radio.notice ? <div className="notice">{radio.notice}</div> : null}
 
       <div className="footer">
         <span className="label">next</span>
-        <button
-          className="next"
-          onClick={radio.next}
-          title="skip to it"
-          disabled={!upNext}
-        >
+        <button className="next" onClick={radio.next} title="skip to it" disabled={!upNext}>
           {upNext ? (
             <>
               {upNext.node.title} — {upNext.node.artist}

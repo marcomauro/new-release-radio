@@ -39,6 +39,9 @@ version):
 | `enqueue(track)` | – | append after the current track (with `CAPS.QUEUE`) |
 | `skip()` | – | platform-native "next" (with `CAPS.QUEUE`) |
 | `seek(ms)` | – | with `CAPS.SEEK` |
+| `setVolume(0..100)` | – | with `CAPS.VOLUME` |
+| `listOutputs()` / `outputs()` / `currentOutput()` / `selectOutput(id)` | – | with `CAPS.OUTPUTS`: the device pill in the top bar is built from these, so a new platform gets it for free. Return `{ id, name, kind, active, volume, supportsVolume }`. |
+| `adopt(ref)` | – | take over a session that is already playing, without sending a play command |
 | `mount(el)` / `unmount()` | – | for platforms that need a DOM host (iframes) |
 | `artwork(track)` | – | `{ url, fallback }` or `null`, with `CAPS.ARTWORK` |
 | `teardown()` | – | called when the user switches provider |
@@ -56,6 +59,8 @@ version):
   artwork,    // { url, fallback } when the platform hands it to you for free
   message,    // human-readable status ("no active device", …)
   authError,  // the session died: the UI offers to reconnect
+  volume,        // 0-100 or null when unknown
+  volumeAvailable, // false disables the slider (and the UI explains why)
 }
 ```
 
@@ -68,10 +73,18 @@ version):
 | `CAPS.SEEK` | the progress line becomes draggable. |
 | `CAPS.PREVIEW` | the UI expects a fragment, not a whole track. |
 | `CAPS.ARTWORK` | covers come from the provider; otherwise the placeholder is used. |
+| `CAPS.VOLUME` | the volume slider is live; without it the slider is shown disabled with the reason. |
+| `CAPS.OUTPUTS` | the device pill appears in the top bar and in the panel. |
 | `CAPS.SILENT` | no audio (dry run). |
 
 `CAPS.QUEUE` is the one worth implementing: it is what makes the stream truly
 gapless, because the platform never waits for us between tracks.
+
+**On joining a running session.** If your platform can already be playing when
+the page loads, report it from `poll()` and implement `adopt(ref)`. The engine
+calls `adopt` instead of `start`, so nothing restarts, and it moves the walk onto
+the playing track when the archive knows it. A provider that always calls `start`
+turns a remote control back into a second player.
 
 ---
 
