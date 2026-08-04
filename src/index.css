@@ -127,6 +127,28 @@ input {
   border-color: color-mix(in srgb, var(--genre) 45%, transparent);
 }
 
+/* The one call to action on the main screen: without it, someone with Premium
+   has no way out of preview mode without opening the panel. */
+.chip.connect {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #1db954;
+  border-color: rgba(29, 185, 84, 0.45);
+}
+
+.chip.connect:hover {
+  color: #1ed760;
+  border-color: rgba(30, 215, 96, 0.8);
+  background: rgba(29, 185, 84, 0.08);
+}
+
+.chip.connect svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+
 /* --- output pill: where the sound comes out ------------------------------ */
 
 .pill-wrap {
@@ -418,7 +440,15 @@ input {
 }
 
 .volume.off {
-  opacity: 0.3;
+  opacity: 0.34;
+}
+
+.volume.off.askable {
+  cursor: help;
+}
+
+.volume.off.askable:hover {
+  opacity: 0.6;
 }
 
 .volume .spk {
@@ -563,20 +593,36 @@ input {
   min-height: 14px;
 }
 
-/* The Spotify preview iframe. It is what decodes the audio, so it stays in the
-   page and at a normal size — a 1px or display:none iframe risks the embed
-   never initialising — but it is invisible and inert: the interface has one
-   player, ours, and this is only its engine. */
-.embed {
+/* The Spotify preview engine, caged.
+
+   The Spotify iFrame API REPLACES the element it is handed with its own
+   <iframe>, so styling that element achieves nothing: the iframe lands in the
+   normal flow, full width, with Spotify's own controls — which is exactly the
+   green bar that used to appear under our player. So we style the CAGE and let
+   the API do whatever it likes to the child inside it.
+
+   The cage stays inside the viewport at a plausible size (a 1px, display:none
+   or off-screen embed risks never initialising, and players do sometimes stop
+   when scrolled out of view) but is invisible and cannot be clicked. The audio
+   comes from here; every control belongs to our player. */
+.embed-cage {
   position: absolute;
   bottom: 0;
   left: 50%;
-  width: 300px;
-  height: 80px;
   transform: translateX(-50%);
+  width: 320px;
+  height: 80px;
+  overflow: hidden;
   opacity: 0;
   pointer-events: none;
   z-index: -1;
+}
+
+.embed-cage > *,
+.embed-cage iframe {
+  width: 100% !important;
+  height: 100% !important;
+  border: 0;
 }
 
 /* --- panel --------------------------------------------------------------- */

@@ -61,12 +61,15 @@ export function ProgressBar({ position, duration, seekable, onSeek }) {
  * not), the slider stays visible but disabled and says why: a dead control is
  * worse than an honest one.
  */
-export function Volume({ value, available, onChange, unavailableReason }) {
+export function Volume({ value, available, onChange, unavailableReason, onUnavailable }) {
   const last = useRef(60)
   const level = value == null ? 60 : value
   const known = value != null
   const toggleMute = () => {
-    if (!available) return
+    if (!available) {
+      if (onUnavailable) onUnavailable()
+      return
+    }
     if (level > 0) {
       last.current = level
       onChange(0)
@@ -76,14 +79,17 @@ export function Volume({ value, available, onChange, unavailableReason }) {
   }
   return (
     <div
-      className={`volume${available ? '' : ' off'}`}
+      className={`volume${available ? '' : ' off'}${!available && onUnavailable ? ' askable' : ''}`}
+      onClick={available ? undefined : onUnavailable}
       title={
         available
           ? `Volume ${known ? `${level}%` : ''} — click the speaker to mute`
           : unavailableReason || 'volume is not available on this player'
       }
     >
-      <button className="spk" onClick={toggleMute} disabled={!available} aria-label="Mute">
+      {/* Not disabled when unavailable: a control that explains itself beats a
+          dead one. The slider stays inert, the speaker answers. */}
+      <button className="spk" onClick={toggleMute} aria-label={available ? 'Mute' : 'Why is volume off?'}>
         <Speaker level={available && known ? level : 0} />
       </button>
       <input
@@ -109,6 +115,7 @@ export default function Controls({
   canSetVolume,
   onVolume,
   volumeReason,
+  onVolumeUnavailable,
 }) {
   return (
     <div className="controls">
@@ -128,6 +135,7 @@ export default function Controls({
         available={canSetVolume}
         onChange={onVolume}
         unavailableReason={volumeReason}
+        onUnavailable={onVolumeUnavailable}
       />
     </div>
   )

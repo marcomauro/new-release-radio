@@ -78,6 +78,7 @@ export function useRadio() {
   const busyRef = useRef(false)
   const adoptedRef = useRef(false) // did we already look for a running session?
   const justLoggedInRef = useRef(false)
+  const loginErrorRef = useRef('')
   const volumeTimer = useRef(null)
   const volumeTouchedAt = useRef(0)
 
@@ -93,7 +94,9 @@ export function useRadio() {
     let alive = true
     ;(async () => {
       // finish a pending OAuth redirect before anything reads the token
-      justLoggedInRef.current = await completeLoginIfNeeded()
+      const login = await completeLoginIfNeeded()
+      justLoggedInRef.current = login.completed
+      loginErrorRef.current = login.error
       if (!providersRef.current) providersRef.current = createProviders()
       try {
         const loaded = await loadArchive()
@@ -112,8 +115,18 @@ export function useRadio() {
         setRulesetState(rules)
         setProviderId(preferredProviderId(providersRef.current, saved))
         setProviderPinned(!!(saved && saved.providerPinned))
-        setNotice(loaded.notice || '')
-        if (loaded.notice) setTimeout(() => alive && setNotice(''), 6000)
+        // A refused login outranks any other notice: it is the one failure the
+        // user cannot diagnose alone. The usual cause is a deployment URL that
+        // is not registered as a redirect URI in the Spotify app.
+        if (loginErrorRef.current) {
+          setNotice(
+            `Spotify refused the login (${loginErrorRef.current}) — this address must be registered ` +
+              `as a redirect URI in the Spotify app settings`
+          )
+        } else {
+          setNotice(loaded.notice || '')
+          if (loaded.notice) setTimeout(() => alive && setNotice(''), 6000)
+        }
         setPhase('ready')
       } catch (e) {
         if (!alive) return
@@ -391,6 +404,18 @@ export function useRadio() {
     [station, archive, startCurrent]
   )
 
+  /**
+   * Connect Spotify from anywhere, whatever provider is on air. The preview
+   * provider has no authenticate() of its own, so asking the *current* provider
+   * to log in was a dead end: this reaches into the registry for the one that
+   * can play full tracks.
+   */
+  const connectSpotify = useCallback(() => {
+    const list = providersRef.current || []
+    const full = list.find((p) => p.caps.has(CAPS.FULL) && p.authenticate)
+    if (full) full.authenticate()
+  }, [])
+
   const setRuleset = useCallback(
     (next) => {
       const rules = typeof next === 'string' ? presetById(next) : next
@@ -467,6 +492,21 @@ export function useRadio() {
 
   const status = provider ? provider.status() : { available: false, authenticated: false, message: '' }
 
+  // Is there a full-track player waiting behind a login?
+  const canConnect = !!(providers || []).some(
+    (p) => p.caps.has(CAPS.FULL) && p.authenticate && !p.status().authenticated
+  )
+
+  // Why the volume is dead, said out loud when the user reaches for it.
+  const explainVolume = useCallback(() => {
+    setNotice(
+      canConnect
+        ? 'the Spotify preview player has no volume control — connect Spotify (top right) for full tracks, volume and device choice'
+        : 'this player has no volume control'
+    )
+    setTimeout(() => setNotice(''), 7000)
+  }, [canConnect])
+
   // Logged in but listening to previews: say it once, quietly, instead of
   // silently serving 30-second clips to someone with a Premium session.
   const hint =
@@ -485,6 +525,9 @@ export function useRadio() {
     providerId: provider ? provider.id : null,
     switchProvider,
     authenticate: () => provider && provider.authenticate && provider.authenticate(),
+    connectSpotify,
+    canConnect,
+    explainVolume,
     signOut: () => {
       if (provider && provider.signOut) provider.signOut()
       setOutputs([])

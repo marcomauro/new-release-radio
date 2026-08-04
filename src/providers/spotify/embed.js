@@ -179,10 +179,14 @@ export function createEmbedProvider() {
     async poll() {
       const endedRef = ended
       ended = null
+      // Report the duration the embed actually reports. A browser with a live
+      // Spotify session gets the WHOLE track from the embed, not 30 seconds —
+      // capping it here made the progress bar lie about what was playing. The
+      // 30-second case is detected in the listener above instead.
       return makeSnapshot({
         playing: snap.playing,
         position: snap.position,
-        duration: Math.min(snap.duration || 0, 30000) || snap.duration,
+        duration: snap.duration || 0,
         ref,
         endedRef,
         message,
