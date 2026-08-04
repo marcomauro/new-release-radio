@@ -95,8 +95,30 @@ track and every track the walk decides is appended to Spotify's own queue
 playlist is ever created. The app is a remote control: the audio comes out of
 Spotify on the device you choose.
 
+**A live Spotify session always wins.** If there is a token, the radio
+remote-controls Spotify — it never serves 30-second previews to someone with a
+Premium session just because previews are what played last time. And if Spotify
+is *already playing* when the page loads, the radio **joins that session**
+instead of interrupting it: no restart, and when the track is in the archive the
+walk continues from it. The only things that outrank this are `?player=<id>` in
+the URL and a player you picked by hand in the panel.
+
 It also works the other way round — if you change track yourself in Spotify, the
 walk **moves onto that track** and carries on from there instead of fighting you.
+
+**One player, ours.** Whatever the source, the page shows a single set of
+controls: cover, progress, play/pause, next, new station, volume, and a pill for
+the device. When previews are the source, Spotify's iframe still decodes the
+audio but sits off-screen and inert — it is an engine, not a second player.
+
+**Volume** drives the real device volume over Connect. The Spotify preview embed
+exposes no volume control at all, so there the slider stays visible but disabled
+and says why, rather than pretending to work.
+
+**Where it plays**: the pill in the top bar lists your Spotify devices (phone,
+desktop, speaker, car) and moves the stream without a gap — it is the contract's
+`CAPS.OUTPUTS`, not a Spotify special case, so a future platform gets the same
+pill for free.
 
 **Dry run** is for developing the rules: covers and captions run past at speed
 with no streaming account and no network, and it is the proof that the provider
@@ -214,7 +236,8 @@ new-release-radio/
 ├── public/graph.json              # vendored archive snapshot (fallback / offline)
 ├── scripts/
 │   ├── sync_graph.py              # refresh + validate the snapshot
-│   └── walk.mjs                   # run the walk in the terminal
+│   ├── walk.mjs                   # run the walk in the terminal
+│   └── make_icons.mjs             # re-render the PNG icons from one SVG source
 ├── src/
 │   ├── core/
 │   │   ├── graph.js               # load + hydrate + index the archive
@@ -226,7 +249,7 @@ new-release-radio/
 │   │   ├── simulated.js           # dry run: the radio with the sound off
 │   │   └── spotify/               # auth (PKCE) · api · connect · embed · artwork
 │   ├── radio/useRadio.js          # the engine: walk ⇄ player
-│   ├── ui/                        # Cover · Controls · Panel
+│   ├── ui/                        # Cover · Controls · OutputPill · Panel
 │   ├── App.jsx · theme.js · index.css
 └── vite.config.js
 ```

@@ -8,6 +8,15 @@
 
    No QUEUE capability: previews are advanced by us, one track at a time, when
    the iframe reports the preview is over.
+
+   The iframe lives off-screen: the interface has ONE player, ours. Everything
+   the user can do here goes through our own controls, which is why pause and
+   resume below are careful to use the real methods when the embed API exposes
+   them and to fall back to togglePlay only when the state says it is safe.
+
+   No CAPS.VOLUME: the embed API has no volume control at all (the level is the
+   one set inside Spotify). The UI shows the volume slider disabled and says so,
+   rather than pretending.
    -------------------------------------------------------------------------- */
 
 import { CAPS, makeSnapshot } from '../provider.js'
@@ -135,16 +144,25 @@ export function createEmbedProvider() {
     },
 
     async pause() {
+      const ctrl = controller
+      if (!ctrl) return
       try {
-        controller && controller.togglePlay()
+        if (typeof ctrl.pause === 'function') ctrl.pause()
+        else if (snap.playing) ctrl.togglePlay()
+        snap = { ...snap, playing: false }
       } catch (e) {
         /* noop */
       }
     },
 
     async resume() {
+      const ctrl = controller
+      if (!ctrl) return
       try {
-        controller && controller.play()
+        // `play()` would restart the preview from zero: only togglePlay resumes.
+        if (typeof ctrl.resume === 'function') ctrl.resume()
+        else if (!snap.playing) ctrl.togglePlay()
+        snap = { ...snap, playing: true }
       } catch (e) {
         /* noop */
       }

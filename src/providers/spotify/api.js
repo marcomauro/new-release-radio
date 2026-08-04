@@ -56,6 +56,13 @@ export const queue = (uri, deviceId) =>
     `/me/player/queue?uri=${encodeURIComponent(uri)}` + (deviceId ? `&device_id=${deviceId}` : ''),
     'POST'
   )
+/** 0-100 on the given device. 403 = the device refuses remote volume. */
+export const volume = (percent, deviceId) =>
+  call(
+    `/me/player/volume?volume_percent=${Math.max(0, Math.min(100, Math.round(percent)))}` +
+      (deviceId ? `&device_id=${deviceId}` : ''),
+    'PUT'
+  )
 export const shuffle = (on) => call(`/me/player/shuffle?state=${on ? 'true' : 'false'}`, 'PUT')
 export const repeat = (mode) => call(`/me/player/repeat?state=${mode}`, 'PUT')
 

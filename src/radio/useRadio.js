@@ -15,6 +15,11 @@
    • no QUEUE (previews, dry run) — we advance ourselves when poll() reports the
      track ended, and start the next one.
 
+   Joining a session that is already running is a first-class case, not an edge
+   case: on load, if Spotify is already playing, the radio adopts that session
+   (no restart) and — when the track is in the archive — continues the walk from
+   it. That is the difference between a remote control and a second player.
+
    The hook owns no music logic. Rules live in core/rules.js.
    -------------------------------------------------------------------------- */
 
@@ -28,6 +33,10 @@ import { prefetchCovers } from '../providers/spotify/artwork.js'
 
 const LS_SESSION = 'nrr_session_v1'
 const POLL_MS = { queue: 2500, local: 400 }
+const VOLUME_DEBOUNCE_MS = 220
+// After a local volume change, ignore the platform's reported level for a
+// moment: Spotify answers with the old value for a beat and the slider jumps.
+const VOLUME_HOLD_MS = 1800
 
 function readSession() {
   try {
@@ -53,17 +62,24 @@ export function useRadio() {
   const rerender = useCallback(() => bump((n) => n + 1), [])
 
   const [providerId, setProviderId] = useState(null)
+  const [providerPinned, setProviderPinned] = useState(false)
   const [ruleset, setRulesetState] = useState(DEFAULT_RULESET)
   const [snapshot, setSnapshot] = useState({ playing: false, position: 0, duration: 0 })
   const [cover, setCover] = useState(null)
   const [notice, setNotice] = useState('')
   const [wantsPlay, setWantsPlay] = useState(false) // the user pressed play at least once
+  const [volume, setVolumeState] = useState(null) // 0-100, null = unknown
+  const [outputs, setOutputs] = useState([])
 
   const providersRef = useRef(null)
   const stationRef = useRef(null)
   const expectedRef = useRef(null) // platform ref we believe is on air
   const queuedRef = useRef(null) // platform ref already handed to the platform
   const busyRef = useRef(false)
+  const adoptedRef = useRef(false) // did we already look for a running session?
+  const justLoggedInRef = useRef(false)
+  const volumeTimer = useRef(null)
+  const volumeTouchedAt = useRef(0)
 
   const providers = providersRef.current
   const provider = useMemo(
@@ -77,7 +93,7 @@ export function useRadio() {
     let alive = true
     ;(async () => {
       // finish a pending OAuth redirect before anything reads the token
-      await completeLoginIfNeeded()
+      justLoggedInRef.current = await completeLoginIfNeeded()
       if (!providersRef.current) providersRef.current = createProviders()
       try {
         const loaded = await loadArchive()
@@ -94,7 +110,8 @@ export function useRadio() {
         stationRef.current = station
         setArchive(loaded)
         setRulesetState(rules)
-        setProviderId(preferredProviderId(providersRef.current, saved && saved.providerId))
+        setProviderId(preferredProviderId(providersRef.current, saved))
+        setProviderPinned(!!(saved && saved.providerPinned))
         setNotice(loaded.notice || '')
         if (loaded.notice) setTimeout(() => alive && setNotice(''), 6000)
         setPhase('ready')
@@ -122,7 +139,17 @@ export function useRadio() {
   useEffect(() => {
     if (!provider) return
     let alive = true
-    provider.init().then(() => alive && rerender())
+    provider.init().then(() => {
+      if (!alive) return
+      if (provider.caps.has(CAPS.OUTPUTS) && provider.outputs) {
+        setOutputs([...provider.outputs()])
+        // The device list already carries its volume: show the real level
+        // before the first poll instead of a made-up default.
+        const cur = provider.currentOutput && provider.currentOutput()
+        if (cur && cur.volume != null) setVolumeState(cur.volume)
+      }
+      rerender()
+    })
     return () => {
       alive = false
       if (provider.teardown) provider.teardown()
@@ -139,11 +166,12 @@ export function useRadio() {
       writeSession({
         station: stationRef.current.serialize(),
         providerId,
+        providerPinned,
         rulesetId: ruleset.id,
       })
     }, 500)
     return () => clearTimeout(t)
-  }, [phase, providerId, ruleset, snapshot.ref, snapshot.playing])
+  }, [phase, providerId, providerPinned, ruleset, snapshot.ref, snapshot.playing])
 
   /* --- the loop --------------------------------------------------------- */
 
@@ -183,6 +211,48 @@ export function useRadio() {
     [rerender]
   )
 
+  /* --- join a Spotify session that is already running -------------------- */
+
+  useEffect(() => {
+    if (phase !== 'ready' || !provider || !station || !archive || adoptedRef.current) return
+    if (!canQueue || !provider.status().authenticated) return
+    let alive = true
+    ;(async () => {
+      const snap = await provider.poll()
+      if (!alive) return
+      adoptedRef.current = true
+      if (!snap || !snap.ref) {
+        // Nothing on air. Coming straight back from the login redirect, the
+        // intent was unmistakably "play": Connect puts the audio on the device,
+        // not in this tab, so no autoplay policy is in the way.
+        if (justLoggedInRef.current) {
+          justLoggedInRef.current = false
+          setWantsPlay(true)
+          await startCurrent()
+        }
+        return
+      }
+      if (provider.adopt) provider.adopt(snap.ref)
+      expectedRef.current = snap.ref
+      setSnapshot(snap)
+      if (snap.artwork) setCover(snap.artwork)
+      const id = provider.trackIdFromRef ? provider.trackIdFromRef(snap.ref) : null
+      const node = id ? archive.index.node(id) : null
+      if (node) {
+        if (!station.current || station.current.id !== node.id) station.jumpTo(node.id, 'device')
+        setNotice(`picked up your Spotify session — walking on from “${node.title}”`)
+      } else {
+        setNotice('Spotify is playing something outside the archive — press ▶ to start the walk')
+      }
+      setTimeout(() => alive && setNotice(''), 7000)
+      if (snap.playing) setWantsPlay(true) // the loop takes it from here
+      rerender()
+    })()
+    return () => {
+      alive = false
+    }
+  }, [phase, provider, station, archive, canQueue, startCurrent, rerender])
+
   useEffect(() => {
     if (phase !== 'ready' || !provider || !station || !wantsPlay) return
     let alive = true
@@ -196,6 +266,9 @@ export function useRadio() {
         if (!alive) return
         setSnapshot(snap)
         if (snap.artwork) setCover(snap.artwork)
+        if (snap.volume != null && Date.now() - volumeTouchedAt.current > VOLUME_HOLD_MS) {
+          setVolumeState(snap.volume)
+        }
 
         if (canQueue) {
           const ref = snap.ref
@@ -338,24 +411,85 @@ export function useRadio() {
     [provider]
   )
 
+  /** Volume: instant on the slider, debounced on the wire. */
+  const setVolume = useCallback(
+    (percent) => {
+      const v = Math.max(0, Math.min(100, Math.round(percent)))
+      setVolumeState(v)
+      volumeTouchedAt.current = Date.now()
+      if (!provider || !provider.caps.has(CAPS.VOLUME) || !provider.setVolume) return
+      if (volumeTimer.current) clearTimeout(volumeTimer.current)
+      volumeTimer.current = setTimeout(() => {
+        volumeTimer.current = null
+        provider.setVolume(v)
+      }, VOLUME_DEBOUNCE_MS)
+    },
+    [provider]
+  )
+
+  /* --- outputs (where the audio comes out) ------------------------------ */
+
+  const refreshOutputs = useCallback(async () => {
+    if (!provider || !provider.caps.has(CAPS.OUTPUTS) || !provider.listOutputs) return []
+    const list = await provider.listOutputs()
+    setOutputs([...(list || [])])
+    rerender()
+    return list
+  }, [provider, rerender])
+
+  const selectOutput = useCallback(
+    async (id) => {
+      if (!provider || !provider.selectOutput) return
+      await provider.selectOutput(id)
+      await refreshOutputs()
+      // Moving the stream keeps it playing: make sure the loop is watching.
+      setWantsPlay(true)
+    },
+    [provider, refreshOutputs]
+  )
+
+  const switchProvider = useCallback(
+    (id) => {
+      if (!id || id === providerId) return
+      // Never leave two players running: silence the one we are leaving.
+      if (provider && provider.pause) provider.pause()
+      setProviderId(id)
+      setProviderPinned(true) // an explicit choice, remembered as such
+      adoptedRef.current = false // the new provider may have a live session too
+      expectedRef.current = null
+      queuedRef.current = null
+      setOutputs([])
+      setVolumeState(null)
+      setSnapshot({ playing: false, position: 0, duration: 0 })
+    },
+    [provider, providerId]
+  )
+
   const status = provider ? provider.status() : { available: false, authenticated: false, message: '' }
+
+  // Logged in but listening to previews: say it once, quietly, instead of
+  // silently serving 30-second clips to someone with a Premium session.
+  const hint =
+    !canQueue && isLoggedIn() && provider && provider.id !== 'spotify-connect'
+      ? 'Spotify is connected — switch the player to Connect for full tracks'
+      : ''
 
   return {
     phase,
     error,
     archive,
-    notice: notice || (status.message || ''),
+    notice: notice || status.message || hint,
 
     provider,
     providers: providers || [],
     providerId: provider ? provider.id : null,
-    switchProvider: (id) => {
-      setProviderId(id)
-      expectedRef.current = null
-      queuedRef.current = null
-      setSnapshot({ playing: false, position: 0, duration: 0 })
-    },
+    switchProvider,
     authenticate: () => provider && provider.authenticate && provider.authenticate(),
+    signOut: () => {
+      if (provider && provider.signOut) provider.signOut()
+      setOutputs([])
+      rerender()
+    },
     status,
 
     ruleset,
@@ -370,6 +504,18 @@ export function useRadio() {
     playing: snapshot.playing,
     progress: { position: snapshot.position || 0, duration: snapshot.duration || 0 },
     started: wantsPlay,
+
+    // volume
+    volume,
+    canSetVolume: !!(provider && provider.caps.has(CAPS.VOLUME)) && snapshot.volumeAvailable !== false,
+    setVolume,
+
+    // outputs
+    outputs,
+    currentOutput: provider && provider.currentOutput ? provider.currentOutput() : null,
+    canChooseOutput: !!(provider && provider.caps.has(CAPS.OUTPUTS) && status.authenticated),
+    refreshOutputs,
+    selectOutput,
 
     play,
     pause,
