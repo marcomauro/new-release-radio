@@ -42,7 +42,7 @@ version):
 | `setVolume(0..100)` | – | with `CAPS.VOLUME` |
 | `listOutputs()` / `outputs()` / `currentOutput()` / `selectOutput(id)` | – | with `CAPS.OUTPUTS`: the device pill in the top bar is built from these, so a new platform gets it for free. Return `{ id, name, kind, active, volume, supportsVolume }`. |
 | `adopt(ref)` | – | take over a session that is already playing, without sending a play command |
-| `mount(el)` / `unmount()` | – | for platforms that need a DOM host (iframes) |
+| `mount(el)` / `unmount()` | – | for platforms that need a DOM host (iframes). **Assume the host element can be replaced**: Spotify's iFrame API swaps it for its own `<iframe>`, which is why the UI hands over a child inside a styled cage rather than a styled element. |
 | `artwork(track)` | – | `{ url, fallback }` or `null`, with `CAPS.ARTWORK` |
 | `teardown()` | – | called when the user switches provider |
 | `extras` | – | anything platform-specific (the Spotify device picker lives here) |

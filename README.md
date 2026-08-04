@@ -109,7 +109,18 @@ walk **moves onto that track** and carries on from there instead of fighting you
 **One player, ours.** Whatever the source, the page shows a single set of
 controls: cover, progress, play/pause, next, new station, volume, and a pill for
 the device. When previews are the source, Spotify's iframe still decodes the
-audio but sits off-screen and inert — it is an engine, not a second player.
+audio but is **caged** and inert — an engine, not a second player.
+
+> The cage matters: the Spotify iFrame API **replaces** the element you hand it
+> with its own `<iframe>`, so styling that element does nothing — the player
+> lands in the layout, full width, with Spotify's own controls. `.embed-cage`
+> wraps it instead, and the API can do what it likes to the child inside.
+
+**Not connected?** A `connect Spotify` pill sits in the top bar — the preview
+provider has no login of its own, so the pill asks the registry for the player
+that does full tracks. Without it the main screen dead-ended: no volume, no
+device list, 30-second clips, and no way out that did not involve finding the
+panel.
 
 **Volume** drives the real device volume over Connect. The Spotify preview embed
 exposes no volume control at all, so there the slider stays visible but disabled

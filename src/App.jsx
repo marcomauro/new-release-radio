@@ -4,6 +4,7 @@ import { CAPS } from './providers/index.js'
 import Cover from './ui/Cover.jsx'
 import Controls, { ProgressBar } from './ui/Controls.jsx'
 import OutputPill from './ui/OutputPill.jsx'
+import ConnectPill from './ui/ConnectPill.jsx'
 import Panel from './ui/Panel.jsx'
 import { gColor, gLabel } from './theme.js'
 
@@ -12,9 +13,9 @@ import { gColor, gLabel } from './theme.js'
    a chip.
 
    There is exactly ONE player on this page — ours. When previews are the source,
-   Spotify's iframe still does the decoding, but it lives off-screen and is
-   driven entirely by the controls below: two players competing for the same
-   screen was the bug this replaced. */
+   Spotify's iframe still does the decoding, but it is caged (see `.embed-cage`:
+   the iFrame API replaces the element it is given, so the cage is what carries
+   the styling) and driven entirely by the controls below. */
 
 export default function App() {
   const radio = useRadio()
@@ -75,14 +76,18 @@ export default function App() {
       <div className="topbar">
         <span className="wordmark">New Release Radio</span>
         <span className="spacer" />
-        {radio.canChooseOutput && (
+        {/* Devices when connected; the way in when not. One of the two is
+            always there, so the main screen never dead-ends. */}
+        {radio.canChooseOutput ? (
           <OutputPill
             outputs={radio.outputs}
             current={radio.currentOutput}
             onSelect={radio.selectOutput}
             onRefresh={radio.refreshOutputs}
           />
-        )}
+        ) : radio.canConnect ? (
+          <ConnectPill onConnect={radio.connectSpotify} />
+        ) : null}
         <button className="chip accent" onClick={() => setPanel(true)} title="Station rules">
           {radio.ruleset.label}
         </button>
@@ -131,11 +136,18 @@ export default function App() {
               ? 'the Spotify preview player has no volume control — connect Spotify for full tracks and volume'
               : 'this player does not expose a volume control'
           }
+          onVolumeUnavailable={radio.explainVolume}
         />
 
-        {/* Spotify decodes the preview; it is deliberately off-screen so the
-            page has a single player. Our controls drive it. */}
-        {needsHost && <div ref={hostRef} className="embed hidden" aria-hidden="true" />}
+        {/* Spotify decodes the preview. The API replaces the inner element with
+            its own iframe, so the CAGE carries the styling that keeps it out of
+            sight — otherwise Spotify's player lands in the layout with its own
+            controls. Ours are the only ones on screen. */}
+        {needsHost && (
+          <div className="embed-cage" aria-hidden="true">
+            <div ref={hostRef} />
+          </div>
+        )}
       </div>
 
       {radio.notice ? <div className="notice">{radio.notice}</div> : null}

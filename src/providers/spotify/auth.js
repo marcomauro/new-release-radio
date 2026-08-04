@@ -99,27 +99,39 @@ export async function login() {
 }
 
 /**
- * Call once at startup: if we came back from the redirect with ?code, exchange
- * it for tokens. Always cleans the query string, success or not.
- * @returns {Promise<boolean>} true when a login just completed
+ * Call once at startup: if we came back from the redirect, finish the exchange.
+ * Always cleans the query string, success or not.
+ *
+ * It reports failures instead of swallowing them: an unregistered redirect URI
+ * is THE most likely reason Connect never works on a new deployment, and it
+ * arrives as `?error=…` with no code. Silently dropping that leaves the user
+ * staring at a preview player with no idea why.
+ *
+ * @returns {Promise<{completed: boolean, error: string}>}
  */
 export async function completeLoginIfNeeded() {
-  if (typeof window === 'undefined') return false
+  const none = { completed: false, error: '' }
+  if (typeof window === 'undefined') return none
   const url = new URL(window.location.href)
   const code = url.searchParams.get('code')
   const state = url.searchParams.get('state')
-  if (!code) return false
-  const expected = localStorage.getItem(LS_STATE)
-  const verifier = localStorage.getItem(LS_VERIFIER)
+  const denied = url.searchParams.get('error')
   const clean = () => {
     url.searchParams.delete('code')
     url.searchParams.delete('state')
     url.searchParams.delete('error')
     window.history.replaceState({}, '', url.toString())
   }
+  if (denied) {
+    clean()
+    return { completed: false, error: denied }
+  }
+  if (!code) return none
+  const expected = localStorage.getItem(LS_STATE)
+  const verifier = localStorage.getItem(LS_VERIFIER)
   if (!verifier || (expected && state !== expected)) {
     clean()
-    return false
+    return { completed: false, error: 'state_mismatch' }
   }
   try {
     const body = new URLSearchParams({
@@ -137,7 +149,7 @@ export async function completeLoginIfNeeded() {
     const j = await r.json()
     if (!r.ok || !j.access_token) {
       clean()
-      return false
+      return { completed: false, error: (j && j.error) || 'token_exchange_failed' }
     }
     writeTokens({
       access_token: j.access_token,
@@ -148,10 +160,10 @@ export async function completeLoginIfNeeded() {
     localStorage.removeItem(LS_VERIFIER)
     localStorage.removeItem(LS_STATE)
     clean()
-    return true
+    return { completed: true, error: '' }
   } catch (e) {
     clean()
-    return false
+    return { completed: false, error: 'network' }
   }
 }
 
