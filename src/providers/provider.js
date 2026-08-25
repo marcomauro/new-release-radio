@@ -23,7 +23,10 @@
      enqueue(track)              → append after the current one (CAPS.QUEUE)
      skip()                      → optional: platform-native "next" (CAPS.QUEUE)
      pause() / resume() / seek(ms)
-     setVolume(0..100)           → CAPS.VOLUME
+     setVolume(0..100)           → CAPS.VOLUME. Returns { ok, message }: a
+                                   platform that refuses (a phone sets its own
+                                   volume) must say so, so the UI can stop
+                                   offering a control that cannot work
      listOutputs() / outputs() / currentOutput() / selectOutput(id)
                                  → CAPS.OUTPUTS: where the audio comes out
      poll()                      → Snapshot, the single source of playback truth

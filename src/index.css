@@ -268,16 +268,16 @@ input {
   min-height: 0;
 }
 
-/* Driven by HEIGHT, not width: a flex column will happily shrink a
-   width-constrained box vertically, and `aspect-ratio` loses that argument —
-   which is how the cover ended up 315x265 on a short phone and 225x33 in
-   landscape. Height + aspect-ratio + max-width can only ever be a square that
-   fits. */
+/* Square, and it has to stay square on every screen. Two ways get this wrong:
+   `flex: 0 1 auto` lets a flex column squash the height (315x265 on a short
+   phone, 225x33 in landscape), and driving from `height` with `max-width: 100%`
+   clamps the width while the height stands (315x335 on a 360 px Android).
+   So: the WIDTH is the single source — already bounded by vh through --cover —
+   the aspect ratio derives the height, and nothing is allowed to shrink it. */
 .cover {
   position: relative;
-  height: var(--cover);
-  width: auto;
-  max-width: 100%;
+  width: min(var(--cover), 100%);
+  height: auto;
   aspect-ratio: 1;
   border-radius: 4px;
   overflow: hidden;
@@ -556,6 +556,14 @@ input {
 
 .volume input[type='range']:disabled {
   cursor: default;
+}
+
+/* A disabled form control swallows clicks and does not let them reach an
+   ancestor, so tapping the slider taught the user nothing. Letting the pointer
+   fall through means the whole volume area answers "why is this off?" — the only
+   channel that exists on a touch screen, where there is no tooltip. */
+.volume.off input[type='range'] {
+  pointer-events: none;
 }
 
 .volume input[type='range']::-webkit-slider-runnable-track {
@@ -934,26 +942,10 @@ input {
    its own centred row instead, and becomes properly usable rather than a stub.
    (Earlier this control was simply hidden below 380 px, which left a lone
    speaker icon that read as a broken button.) */
-@media (max-width: 480px) and (orientation: portrait) {
-  :root {
-    /* the volume has its own row down here, so the cover gives back some height */
-    --cover: min(42vh, 340px);
-  }
-  .controls {
-    flex-direction: column;
-    gap: 12px;
-  }
-  .volume {
-    position: static;
-    justify-content: center;
-    opacity: 0.85;
-  }
-  .volume input[type='range'] {
-    width: 128px;
-  }
-}
-
-/* Touch: nothing you have to aim at should be 22 px tall. */
+/* Touch: nothing you have to aim at should be 22 px tall.
+   The volume only renders here when the audio is NOT coming out of the handset
+   (see Controls.jsx / App.jsx) — a phone refuses the remote command and its own
+   buttons already do the job. When it does render, it needs finger sizes. */
 @media (hover: none) and (pointer: coarse) {
   .chip {
     min-height: 34px;
@@ -965,6 +957,16 @@ input {
   }
   .volume input[type='range'] {
     height: 34px;
+  }
+  /* A 9 px thumb is a desktop affordance. Fingers need something to catch. */
+  .volume input[type='range']::-webkit-slider-thumb {
+    width: 16px;
+    height: 16px;
+    margin-top: -7px;
+  }
+  .volume input[type='range']::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
   }
   .footer {
     min-height: 52px;
@@ -980,6 +982,29 @@ input {
   }
   .opt {
     padding: 12px 14px;
+  }
+}
+
+/* Phone, portrait, WITH a volume control (so: playing to a speaker or a
+   computer). A 74 px control cannot share a 315 px row with the transport, so it
+   takes a row of its own — and the cover gives back the height that row costs.
+   `:has` scopes this to the case where the control actually rendered; without
+   it the layout is simply the one-row version. */
+@media (max-width: 480px) and (orientation: portrait) {
+  .controls.with-volume {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .controls.with-volume .volume {
+    position: static;
+    justify-content: center;
+    opacity: 0.85;
+  }
+  .controls.with-volume .volume input[type='range'] {
+    width: 128px;
+  }
+  .screen:has(.controls.with-volume) {
+    --cover: min(42vh, 340px);
   }
 }
 
@@ -1005,8 +1030,8 @@ input {
   }
   .cover {
     grid-area: cover;
-    height: var(--cover);
-    width: auto;
+    width: min(var(--cover), 42vw);
+    height: auto;
     flex: none;
     align-self: center;
   }
