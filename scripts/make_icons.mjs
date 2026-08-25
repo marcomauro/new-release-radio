@@ -11,8 +11,12 @@
 
    Needs a Chromium that Playwright can drive (PLAYWRIGHT_BROWSERS_PATH or a
    local install); it is a build-time tool, never shipped to the browser.
-   Outputs: pwa-192.png, pwa-512.png, pwa-maskable-512.png,
-   apple-touch-icon-180.png in public/.
+   Outputs: pwa-192-v2.png, pwa-512-v2.png, pwa-maskable-512-v2.png,
+   apple-touch-icon-180-v2.png in public/.
+
+   The `-vN` suffix is deliberate: an installed PWA keeps the icon it fetched
+   at install time, and an unchanged URL gives the platform no reason to look
+   again. When the artwork changes, bump the suffix here and in vite.config.js.
    -------------------------------------------------------------------------- */
 
 import { writeFileSync, mkdirSync } from 'node:fs'
@@ -63,12 +67,12 @@ const svg = ({ scale = 1, radius = 0 }) => `
 
 const ICONS = [
   // Full-bleed light tile: the OS rounds it as it likes.
-  { file: 'pwa-192.png', size: 192, scale: 1.15, radius: 0 },
-  { file: 'pwa-512.png', size: 512, scale: 1.15, radius: 0 },
+  { file: 'pwa-192-v2.png', size: 192, scale: 1.15, radius: 0 },
+  { file: 'pwa-512-v2.png', size: 512, scale: 1.15, radius: 0 },
   // Maskable: everything important inside the safe circle (~80%).
-  { file: 'pwa-maskable-512.png', size: 512, scale: 0.72, radius: 0 },
+  { file: 'pwa-maskable-512-v2.png', size: 512, scale: 0.72, radius: 0 },
   // iOS rounds the corners itself, so ship it square.
-  { file: 'apple-touch-icon-180.png', size: 180, scale: 1.15, radius: 0 },
+  { file: 'apple-touch-icon-180-v2.png', size: 180, scale: 1.15, radius: 0 },
 ]
 
 const { chromium } = await import('playwright').catch(() =>
