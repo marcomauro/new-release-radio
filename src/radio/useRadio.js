@@ -86,6 +86,9 @@ export function useRadio() {
   const [notice, setNotice] = useState('')
   const [wantsPlay, setWantsPlay] = useState(false) // the user pressed play at least once
   const [volume, setVolumeState] = useState(null) // 0-100, null = unknown
+  // Set when the platform refuses a volume command. Kept here, not waited for
+  // from the next poll, so the control stops offering itself immediately.
+  const [volumeNote, setVolumeNote] = useState('')
   const [outputs, setOutputs] = useState([])
 
   const providersRef = useRef(null)
@@ -499,7 +502,7 @@ export function useRadio() {
     [provider]
   )
 
-  /** Volume: instant on the slider, debounced on the wire. */
+  /** Volume: instant on the slider, debounced on the wire, honest on refusal. */
   const setVolume = useCallback(
     (percent) => {
       const v = Math.max(0, Math.min(100, Math.round(percent)))
@@ -507,9 +510,18 @@ export function useRadio() {
       volumeTouchedAt.current = Date.now()
       if (!provider || !provider.caps.has(CAPS.VOLUME) || !provider.setVolume) return
       if (volumeTimer.current) clearTimeout(volumeTimer.current)
-      volumeTimer.current = setTimeout(() => {
+      volumeTimer.current = setTimeout(async () => {
         volumeTimer.current = null
-        provider.setVolume(v)
+        const r = await provider.setVolume(v)
+        // A refusal used to be invisible: the slider sprang back to the old
+        // value at the next poll and the reason lived in a `title` tooltip that
+        // a phone never shows. Now it says so, and the control steps aside.
+        if (r && r.ok === false) {
+          const why = r.message || 'this device does not accept remote volume'
+          setVolumeNote(why) // sticks: the control stays stood down
+          setNotice(why)
+          setTimeout(() => setNotice(''), 7000) // the line itself does not linger
+        }
       }, VOLUME_DEBOUNCE_MS)
     },
     [provider]
@@ -529,6 +541,7 @@ export function useRadio() {
     async (id) => {
       if (!provider || !provider.selectOutput) return
       await provider.selectOutput(id)
+      setVolumeNote('')
       await refreshOutputs()
       // Moving the stream keeps it playing: make sure the loop is watching.
       setWantsPlay(true)
@@ -548,6 +561,7 @@ export function useRadio() {
       queuedRefs.current = []
       setOutputs([])
       setVolumeState(null)
+      setVolumeNote('')
       setSnapshot({ playing: false, position: 0, duration: 0 })
     },
     [provider, providerId]
@@ -560,15 +574,21 @@ export function useRadio() {
     (p) => p.caps.has(CAPS.FULL) && p.authenticate && !p.status().authenticated
   )
 
-  // Why the volume is dead, said out loud when the user reaches for it.
+  // Why the volume is dead, said out loud when the user reaches for it — the
+  // only channel that works on a touch screen, where there is no tooltip.
   const explainVolume = useCallback(() => {
-    setNotice(
-      canConnect
-        ? 'the Spotify preview player has no volume control — connect Spotify (top right) for full tracks, volume and device choice'
-        : 'this player has no volume control'
-    )
+    const out = provider && provider.currentOutput ? provider.currentOutput() : null
+    const isPhone = out && (out.type === 'Smartphone' || out.type === 'Tablet')
+    const why =
+      volumeNote ||
+      (isPhone
+        ? `${out.name} sets its own volume — use the buttons on the device`
+        : canConnect
+          ? 'the Spotify preview player has no volume control — connect Spotify (top right) for full tracks, volume and device choice'
+          : 'this player has no volume control')
+    setNotice(why)
     setTimeout(() => setNotice(''), 7000)
-  }, [canConnect])
+  }, [canConnect, volumeNote, provider])
 
   // Logged in but listening to previews: say it once, quietly, instead of
   // silently serving 30-second clips to someone with a Premium session.
@@ -613,7 +633,11 @@ export function useRadio() {
 
     // volume
     volume,
-    canSetVolume: !!(provider && provider.caps.has(CAPS.VOLUME)) && snapshot.volumeAvailable !== false,
+    canSetVolume:
+      !!(provider && provider.caps.has(CAPS.VOLUME)) &&
+      snapshot.volumeAvailable !== false &&
+      !volumeNote,
+    volumeNote,
     setVolume,
 
     // outputs

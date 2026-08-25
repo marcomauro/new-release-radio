@@ -144,9 +144,10 @@ export default function App() {
           canSetVolume={radio.canSetVolume}
           onVolume={radio.setVolume}
           volumeReason={
-            isPreview
+            radio.volumeNote ||
+            (isPreview
               ? 'the Spotify preview player has no volume control — connect Spotify for full tracks and volume'
-              : 'this player does not expose a volume control'
+              : 'this player does not expose a volume control')
           }
           onVolumeUnavailable={radio.explainVolume}
         />

@@ -78,6 +78,7 @@ export function createSimulatedProvider({ speed = 8 } = {}) {
 
     async setVolume(percent) {
       vol = Math.max(0, Math.min(100, Math.round(percent)))
+      return { ok: true, message: '' }
     },
 
     async poll() {

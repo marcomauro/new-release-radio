@@ -558,6 +558,14 @@ input {
   cursor: default;
 }
 
+/* A disabled form control swallows clicks and does not let them reach an
+   ancestor, so tapping the slider taught the user nothing. Letting the pointer
+   fall through means the whole volume area answers "why is this off?" — the only
+   channel that exists on a touch screen, where there is no tooltip. */
+.volume.off input[type='range'] {
+  pointer-events: none;
+}
+
 .volume input[type='range']::-webkit-slider-runnable-track {
   height: 2px;
   border-radius: 2px;
@@ -965,6 +973,16 @@ input {
   }
   .volume input[type='range'] {
     height: 34px;
+  }
+  /* A 9 px thumb is a desktop affordance. Fingers need something to catch. */
+  .volume input[type='range']::-webkit-slider-thumb {
+    width: 16px;
+    height: 16px;
+    margin-top: -7px;
+  }
+  .volume input[type='range']::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
   }
   .footer {
     min-height: 52px;

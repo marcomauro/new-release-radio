@@ -47,6 +47,9 @@ export function createConnectProvider() {
   let message = ''
   let started = false
   let lastRef = null // what Spotify last told us is on air
+  // Devices that answered a volume command with a refusal. A phone usually
+  // does: its level is the operating system's, not Spotify's to set.
+  const volumeRefused = new Set()
 
   const isMobile = () =>
     typeof navigator !== 'undefined' && /iphone|ipad|android/i.test(navigator.userAgent)
@@ -59,7 +62,7 @@ export function createConnectProvider() {
       kind: KIND[d.type] || (d.type || '').toLowerCase(),
       active: !!d.is_active,
       volume: typeof d.volume_percent === 'number' ? d.volume_percent : null,
-      supportsVolume: d.supports_volume !== false,
+      supportsVolume: d.supports_volume !== false && !volumeRefused.has(d.id),
     }
 
   async function refreshDevices() {
@@ -246,16 +249,31 @@ export function createConnectProvider() {
       }
     },
 
-    /** 0–100. Spotify applies it to the active device. */
+    /**
+     * 0–100 on the active device. Returns whether it took, because a refusal is
+     * not an edge case: the Spotify app on a phone maps volume to the operating
+     * system's, and answers 403. Reporting that lets the UI stop offering a
+     * control that cannot work, instead of letting the slider spring back to
+     * its old value at the next poll and inviting another try.
+     */
     async setVolume(percent) {
       const v = Math.max(0, Math.min(100, Math.round(percent)))
+      const target = device
       if (device) device = { ...device, volume: v }
       try {
-        await api.volume(v, device ? device.id : undefined)
+        await api.volume(v, target ? target.id : undefined)
+        return { ok: true, message: '' }
       } catch (e) {
-        // Devices that cannot be volumed report 403 — say so once, quietly.
-        if (e && e.status === 403) message = 'this device does not accept remote volume'
-        else handleError(e)
+        if (target) {
+          volumeRefused.add(target.id)
+          device = { ...device, volume: target.volume } // put the real level back
+        }
+        const phone = target && (target.type === 'Smartphone' || target.type === 'Tablet')
+        const note = phone
+          ? `${target.name} sets its own volume — use the buttons on the device`
+          : `${(target && target.name) || 'this device'} refused the volume command`
+        message = note
+        return { ok: false, message: note }
       }
     },
 
@@ -277,6 +295,7 @@ export function createConnectProvider() {
       const d = devices.find((x) => x.id === id)
       if (!d) return
       userPicked = true
+      volumeRefused.delete(id) // give the new device its own chance
       device = d
       try {
         // `play: true` moves the stream to the new device without a gap.
