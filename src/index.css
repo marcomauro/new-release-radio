@@ -268,16 +268,16 @@ input {
   min-height: 0;
 }
 
-/* Driven by HEIGHT, not width: a flex column will happily shrink a
-   width-constrained box vertically, and `aspect-ratio` loses that argument —
-   which is how the cover ended up 315x265 on a short phone and 225x33 in
-   landscape. Height + aspect-ratio + max-width can only ever be a square that
-   fits. */
+/* Square, and it has to stay square on every screen. Two ways get this wrong:
+   `flex: 0 1 auto` lets a flex column squash the height (315x265 on a short
+   phone, 225x33 in landscape), and driving from `height` with `max-width: 100%`
+   clamps the width while the height stands (315x335 on a 360 px Android).
+   So: the WIDTH is the single source — already bounded by vh through --cover —
+   the aspect ratio derives the height, and nothing is allowed to shrink it. */
 .cover {
   position: relative;
-  height: var(--cover);
-  width: auto;
-  max-width: 100%;
+  width: min(var(--cover), 100%);
+  height: auto;
   aspect-ratio: 1;
   border-radius: 4px;
   overflow: hidden;
@@ -942,47 +942,14 @@ input {
    its own centred row instead, and becomes properly usable rather than a stub.
    (Earlier this control was simply hidden below 380 px, which left a lone
    speaker icon that read as a broken button.) */
-@media (max-width: 480px) and (orientation: portrait) {
-  :root {
-    /* the volume has its own row down here, so the cover gives back some height */
-    --cover: min(42vh, 340px);
-  }
-  .controls {
-    flex-direction: column;
-    gap: 12px;
-  }
-  .volume {
-    position: static;
-    justify-content: center;
-    opacity: 0.85;
-  }
-  .volume input[type='range'] {
-    width: 128px;
-  }
-}
-
-/* Touch: nothing you have to aim at should be 22 px tall. */
+/* Touch: nothing you have to aim at should be 22 px tall.
+   And no volume control here at all — see Controls.jsx: Spotify does not let a
+   phone's volume be set remotely, its own buttons already do it, and the row is
+   simpler without it. */
 @media (hover: none) and (pointer: coarse) {
   .chip {
     min-height: 34px;
     padding: 8px 12px;
-  }
-  .volume .spk {
-    width: 34px;
-    height: 34px;
-  }
-  .volume input[type='range'] {
-    height: 34px;
-  }
-  /* A 9 px thumb is a desktop affordance. Fingers need something to catch. */
-  .volume input[type='range']::-webkit-slider-thumb {
-    width: 16px;
-    height: 16px;
-    margin-top: -7px;
-  }
-  .volume input[type='range']::-moz-range-thumb {
-    width: 16px;
-    height: 16px;
   }
   .footer {
     min-height: 52px;
@@ -1023,8 +990,8 @@ input {
   }
   .cover {
     grid-area: cover;
-    height: var(--cover);
-    width: auto;
+    width: min(var(--cover), 42vw);
+    height: auto;
     flex: none;
     align-self: center;
   }

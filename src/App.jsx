@@ -150,6 +150,7 @@ export default function App() {
               : 'this player does not expose a volume control')
           }
           onVolumeUnavailable={radio.explainVolume}
+          showVolume={!touch}
         />
 
         {/* Spotify decodes the preview. The API replaces the inner element with

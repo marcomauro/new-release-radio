@@ -118,6 +118,7 @@ export default function Controls({
   onVolume,
   volumeReason,
   onVolumeUnavailable,
+  showVolume = true,
 }) {
   return (
     <div className="controls">
@@ -132,13 +133,18 @@ export default function Controls({
           <Next />
         </button>
       </div>
-      <Volume
-        value={volume}
-        available={canSetVolume}
-        onChange={onVolume}
-        unavailableReason={volumeReason}
-        onUnavailable={onVolumeUnavailable}
-      />
+      {/* Not on a phone: Spotify refuses remote volume on a handset and the
+          hardware buttons are right there. One less thing on the smallest
+          screen. */}
+      {showVolume && (
+        <Volume
+          value={volume}
+          available={canSetVolume}
+          onChange={onVolume}
+          unavailableReason={volumeReason}
+          onUnavailable={onVolumeUnavailable}
+        />
+      )}
     </div>
   )
 }
