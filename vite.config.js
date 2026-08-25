@@ -15,7 +15,7 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       injectRegister: 'auto',
-      includeAssets: ['favicon.svg', 'apple-touch-icon-180.png'],
+      includeAssets: ['favicon.svg', 'apple-touch-icon-180-v2.png'],
       manifest: {
         id: base,
         name: 'New Release Radio',
@@ -30,10 +30,15 @@ export default defineConfig({
         theme_color: '#0d0d0f',
         background_color: '#0d0d0f',
         categories: ['music', 'entertainment'],
+        // The icon file names carry a version. Changing artwork under the SAME
+        // URL is invisible to an installed app: Android compares manifest
+        // fields, sees nothing new, and the launcher keeps the bitmap it
+        // downloaded at install time. New URLs are what makes the update
+        // detectable. Bump the suffix whenever the artwork changes.
         icons: [
-          { src: 'pwa-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
-          { src: 'pwa-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
-          { src: 'pwa-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          { src: 'pwa-192-v2.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: 'pwa-512-v2.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: 'pwa-maskable-512-v2.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
       workbox: {
