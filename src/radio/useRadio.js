@@ -20,6 +20,13 @@
    (no restart) and — when the track is in the archive — continues the walk from
    it. That is the difference between a remote control and a second player.
 
+   **Backgrounded phones.** A mobile browser freezes timers as soon as the app
+   leaves the screen, so a radio that keeps only ONE track queued on the
+   platform goes dry within minutes and Spotify starts its own autoplay — the
+   walk silently stops being the thing you are hearing. So the queue is deeper
+   while the page is hidden, and on return the walk fast-forwards over the
+   tracks that played while we were asleep instead of losing them.
+
    The hook owns no music logic. Rules live in core/rules.js.
    -------------------------------------------------------------------------- */
 
@@ -33,6 +40,16 @@ import { prefetchCovers } from '../providers/spotify/artwork.js'
 
 const LS_SESSION = 'nrr_session_v1'
 const POLL_MS = { queue: 2500, local: 400 }
+
+// How many decided tracks sit in the platform's own queue.
+//
+// Visible: one. The rules panel stays responsive — change a rule and it applies
+// to the very next track.
+// Hidden: three (~15 minutes of music). The timers are frozen, nobody is
+// touching the rules, and the only thing that matters is that the stream does
+// not run out and hand the session over to Spotify's autoplay.
+const QUEUE_DEPTH = { visible: 1, hidden: 3 }
+const LOOKAHEAD = QUEUE_DEPTH.hidden + 1
 const VOLUME_DEBOUNCE_MS = 220
 // After a local volume change, ignore the platform's reported level for a
 // moment: Spotify answers with the old value for a beat and the slider jumps.
@@ -74,7 +91,8 @@ export function useRadio() {
   const providersRef = useRef(null)
   const stationRef = useRef(null)
   const expectedRef = useRef(null) // platform ref we believe is on air
-  const queuedRef = useRef(null) // platform ref already handed to the platform
+  const queuedRefs = useRef([]) // platform refs handed over, in queue order
+  const tickRef = useRef(null) // the poll body, so we can fire it on demand
   const busyRef = useRef(false)
   const adoptedRef = useRef(false) // did we already look for a running session?
   const justLoggedInRef = useRef(false)
@@ -108,7 +126,12 @@ export function useRadio() {
           new URLSearchParams(window.location.search).get('seed')
         const seedNode =
           (askedTrack && loaded.index.node(askedTrack)) || randomSeed(loaded.index)
-        const station = createStation({ index: loaded.index, ruleset: rules, seedNode })
+        const station = createStation({
+          index: loaded.index,
+          ruleset: rules,
+          seedNode,
+          lookahead: LOOKAHEAD,
+        })
         if (!askedTrack && saved && saved.station) station.restore(saved.station)
         stationRef.current = station
         setArchive(loaded)
@@ -167,7 +190,7 @@ export function useRadio() {
       alive = false
       if (provider.teardown) provider.teardown()
       expectedRef.current = null
-      queuedRef.current = null
+      queuedRefs.current = []
     }
   }, [provider, rerender])
 
@@ -192,22 +215,31 @@ export function useRadio() {
 
   const station = stationRef.current
 
-  // Hand the next decided track to a queue-capable platform (once).
+  /**
+   * Keep the platform's queue filled to the current depth. Each track is handed
+   * over once; `queuedRefs` is our record of what the platform already holds,
+   * in the order it will play.
+   */
   const topUpQueue = useCallback(async () => {
     if (!canQueue || !provider || !station) return
-    const upcoming = station.upNext(1)[0]
-    if (!upcoming) return
-    const ref = await provider.resolve(upcoming.node)
-    if (!ref || queuedRef.current === ref) return
-    const ok = await provider.enqueue(upcoming.node)
-    if (ok) queuedRef.current = ref
+    const depth = typeof document !== 'undefined' && document.hidden
+      ? QUEUE_DEPTH.hidden
+      : QUEUE_DEPTH.visible
+    for (const upcoming of station.upNext(depth)) {
+      const ref = await provider.resolve(upcoming.node)
+      if (!ref || queuedRefs.current.includes(ref)) continue
+      const ok = await provider.enqueue(upcoming.node)
+      if (!ok) break // no point piling up commands the platform is refusing
+      queuedRefs.current.push(ref)
+    }
   }, [canQueue, provider, station])
 
   const startCurrent = useCallback(async () => {
     if (!provider || !station || !station.current) return
     const ref = await provider.resolve(station.current)
     expectedRef.current = ref
-    queuedRef.current = null
+    // `play(uri)` replaces the platform's context: whatever we had queued is gone.
+    queuedRefs.current = []
     await provider.start(station.current)
     await topUpQueue()
     rerender()
@@ -217,7 +249,9 @@ export function useRadio() {
   const commitTo = useCallback(
     (node, ref) => {
       expectedRef.current = ref
-      queuedRef.current = null
+      // everything up to and including `ref` has left the platform's queue
+      const i = queuedRefs.current.indexOf(ref)
+      queuedRefs.current = i >= 0 ? queuedRefs.current.slice(i + 1) : []
       setCover(null)
       rerender()
     },
@@ -286,11 +320,23 @@ export function useRadio() {
         if (canQueue) {
           const ref = snap.ref
           if (ref && ref !== expectedRef.current) {
-            const upcoming = station.upNext(1)[0]
-            const upcomingRef = upcoming ? await provider.resolve(upcoming.node) : null
-            if (upcomingRef && ref === upcomingRef) {
-              station.advance() // our own choice started playing
-              commitTo(upcoming.node, ref)
+            // Which of our decided tracks is this? Coming back from a locked
+            // screen it can be several steps ahead, so look along the whole
+            // lookahead and commit every step up to it — dropping them on the
+            // floor would lose the history and the no-repeat memory.
+            const ahead = station.upNext(LOOKAHEAD)
+            let hit = -1
+            for (let i = 0; i < ahead.length; i++) {
+              // eslint-disable-next-line no-await-in-loop
+              if ((await provider.resolve(ahead[i].node)) === ref) {
+                hit = i
+                break
+              }
+            }
+            if (hit >= 0) {
+              for (let k = 0; k <= hit; k++) station.advance()
+              if (hit > 0) setNotice('')
+              commitTo(ahead[hit].node, ref)
             } else {
               // something else is on air: follow it if we know the track
               const id = provider.trackIdFromRef ? provider.trackIdFromRef(ref) : null
@@ -316,13 +362,30 @@ export function useRadio() {
       }
     }
 
+    tickRef.current = tick
     tick()
     const h = setInterval(tick, every)
     return () => {
       alive = false
       clearInterval(h)
+      if (tickRef.current === tick) tickRef.current = null
     }
   }, [phase, provider, station, wantsPlay, canQueue, archive, commitTo, startCurrent, topUpQueue])
+
+  /* --- leaving and returning --------------------------------------------- */
+
+  // The one moment that decides whether a phone in a pocket keeps playing OUR
+  // radio: fill the platform's queue on the way out, and re-sync the instant we
+  // are back, without waiting for the next interval.
+  useEffect(() => {
+    if (phase !== 'ready' || !canQueue || !wantsPlay) return
+    const onVisibility = () => {
+      if (document.hidden) topUpQueue()
+      else if (tickRef.current) tickRef.current()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [phase, canQueue, wantsPlay, topUpQueue])
 
   /* --- cover art -------------------------------------------------------- */
 
@@ -482,7 +545,7 @@ export function useRadio() {
       setProviderPinned(true) // an explicit choice, remembered as such
       adoptedRef.current = false // the new provider may have a live session too
       expectedRef.current = null
-      queuedRef.current = null
+      queuedRefs.current = []
       setOutputs([])
       setVolumeState(null)
       setSnapshot({ playing: false, position: 0, duration: 0 })
