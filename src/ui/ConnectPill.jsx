@@ -20,7 +20,8 @@ export default function ConnectPill({ onConnect }) {
       title="Play whole tracks on your own Spotify device, choose the device and control the volume — needs Premium. The login stays in your browser."
     >
       <Glyph />
-      <span>connect Spotify</span>
+      <span className="wide">connect Spotify</span>
+      <span className="narrow">connect</span>
     </button>
   )
 }

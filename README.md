@@ -116,6 +116,20 @@ audio but is **caged** and inert — an engine, not a second player.
 > lands in the layout, full width, with Spotify's own controls. `.embed-cage`
 > wraps it instead, and the API can do what it likes to the child inside.
 
+**On a phone.** Two things work differently, both deliberate:
+
+- **The queue is deeper when the app is not on screen.** A mobile browser freezes
+  timers the moment you lock the screen, so a radio holding a single track in
+  Spotify's queue runs dry within minutes and Spotify's own autoplay takes the
+  session over — you are no longer listening to the walk. Hidden, the radio keeps
+  **three** tracks queued (~15 minutes); visible, **one**, so the rules panel
+  stays responsive. Coming back, the walk **fast-forwards** over whatever played
+  while it was asleep instead of losing those steps.
+- **Connect comes first.** Before the first play on a touch device the cover
+  offers `connect Spotify`, with previews underneath, named for what they are:
+  30-second clips, no volume, and on iOS a cross-origin iframe that wants the tap
+  inside itself.
+
 **Not connected?** A `connect Spotify` pill sits in the top bar — the preview
 provider has no login of its own, so the pill asks the registry for the player
 that does full tracks. Without it the main screen dead-ended: no volume, no

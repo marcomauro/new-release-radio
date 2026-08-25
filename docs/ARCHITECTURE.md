@@ -77,6 +77,19 @@ playback, which is worse.
 | When does the next track start? | `radio/useRadio.js` |
 | What does it look like? | `ui/*`, `index.css`, `theme.js` |
 
+## The phone is a different machine
+
+Not a smaller screen — a different set of rules:
+
+| what changes | consequence |
+| --- | --- |
+| timers freeze when the app leaves the screen | the platform queue is filled to 3 while `document.hidden`, and the walk fast-forwards on return (`useRadio.js`, `QUEUE_DEPTH`) |
+| a cross-origin iframe wants the tap inside itself | previews are the declared fallback on touch; Connect is offered first |
+| fingers, not pointers | 34 px minimum on anything tappable, under `@media (hover: none)` |
+| `100%` height measures the large viewport | `100dvh`, with `100%` as the fallback |
+| a square that must fit two dimensions | the cover is driven by **height** + `aspect-ratio`; width-driven, a flex column squashes it (315×265 on a short phone, 225×33 in landscape) |
+| landscape is wide and short | the stage becomes a two-column grid: cover left, everything else right |
+
 ## Failure, by design
 
 The radio should degrade, never break:

@@ -52,7 +52,11 @@ input {
 
 .screen {
   position: relative;
+  /* 100% measures the LARGE viewport on mobile, so the footer ends up under the
+     browser chrome. dvh follows the bar as it retracts; the 100% above stays as
+     the fallback for browsers without it. */
   height: 100%;
+  height: 100dvh;
   overflow: hidden; /* the ambient layer is deliberately oversized */
   display: flex;
   flex-direction: column;
@@ -87,6 +91,7 @@ input {
   gap: 10px;
   padding: 14px 18px;
   flex: 0 0 auto;
+  min-width: 0;
 }
 
 .wordmark {
@@ -101,6 +106,10 @@ input {
 }
 
 .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
   font-size: 11px;
   letter-spacing: 0.04em;
   color: var(--muted);
@@ -108,7 +117,16 @@ input {
   border-radius: 999px;
   padding: 4px 10px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   transition: color 0.2s, border-color 0.2s;
+}
+
+/* Two labels ship in the markup; width decides which one is shown, so there is
+   no resize listener and no layout jump. */
+.chip .narrow,
+.pill-wrap .narrow {
+  display: none;
 }
 
 .chip:hover {
@@ -250,16 +268,22 @@ input {
   min-height: 0;
 }
 
+/* Driven by HEIGHT, not width: a flex column will happily shrink a
+   width-constrained box vertically, and `aspect-ratio` loses that argument —
+   which is how the cover ended up 315x265 on a short phone and 225x33 in
+   landscape. Height + aspect-ratio + max-width can only ever be a square that
+   fits. */
 .cover {
   position: relative;
-  width: var(--cover);
+  height: var(--cover);
+  width: auto;
+  max-width: 100%;
   aspect-ratio: 1;
   border-radius: 4px;
   overflow: hidden;
   background: #17171a;
   box-shadow: 0 30px 70px -20px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.05);
-  flex: 0 1 auto;
-  max-height: 58vh;
+  flex: 0 0 auto;
   transition: transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1), opacity 0.4s;
 }
 
@@ -298,7 +322,55 @@ input {
   display: grid;
   place-items: center;
   background: rgba(8, 8, 10, 0.55);
-  backdrop-filter: blur(2px);
+}
+
+/* Before the first play on a phone: Connect is the offer, previews the aside. */
+.cover .veil.offer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 18px;
+  text-align: center;
+  /* Opaque enough that the placeholder initials behind it stop competing with
+     the text of the offer. */
+  background: rgba(8, 8, 10, 0.9);
+}
+
+.connect-big {
+  min-height: 44px;
+  padding: 12px 20px;
+  border: 1px solid rgba(29, 185, 84, 0.55);
+  border-radius: 999px;
+  color: #1ed760;
+  font-size: 13.5px;
+  letter-spacing: 0.01em;
+}
+
+.connect-big:hover {
+  background: rgba(29, 185, 84, 0.12);
+  border-color: rgba(30, 215, 96, 0.9);
+}
+
+.veil .sub {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
+  max-width: 230px;
+}
+
+.veil .tiny {
+  min-height: 40px;
+  padding: 8px 6px;
+  font-size: 11px;
+  color: var(--dim);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.veil .tiny:hover {
+  color: var(--muted);
 }
 
 .bigplay {
@@ -320,7 +392,7 @@ input {
 }
 
 .meta {
-  width: var(--cover);
+  width: min(var(--cover), 100%);
   max-width: 100%;
   text-align: center;
   display: flex;
@@ -370,7 +442,7 @@ input {
 /* --- progress + controls ------------------------------------------------- */
 
 .bar {
-  width: var(--cover);
+  width: min(var(--cover), 100%);
   max-width: 100%;
   display: flex;
   align-items: center;
@@ -410,7 +482,7 @@ input {
    the right edge of the same column, so adding it moved nothing. */
 .controls {
   position: relative;
-  width: var(--cover);
+  width: min(var(--cover), 100%);
   max-width: 100%;
   display: flex;
   align-items: center;
@@ -815,19 +887,156 @@ input {
   .transport {
     gap: 22px;
   }
-  /* Narrow screens: the slider shrinks to the icon plus a hint of track, and
-     the transport keeps the middle of the screen. */
   .volume input[type='range'] {
-    width: 40px;
-  }
-  .chip.out {
-    max-width: 34vw;
+    width: 44px;
   }
 }
 
-@media (max-width: 380px) {
-  .volume input[type='range'] {
+/* Phones. The row has to hold three chips at 360 CSS px, so the wordmark steps
+   aside (the app is named in the tab and in the installed app anyway) and every
+   label switches to its short form. Nothing is clipped and nothing wraps. */
+@media (max-width: 480px) {
+  .topbar {
+    gap: 6px;
+    padding: 10px 12px;
+  }
+  .wordmark {
     display: none;
+  }
+  .chip .wide,
+  .pill-wrap .wide {
+    display: none;
+  }
+  .chip .narrow,
+  .pill-wrap .narrow {
+    display: inline;
+  }
+  .chip.out {
+    max-width: 44vw;
+  }
+  /* Anchored to the viewport with a gutter instead of to the pill: at 360 px the
+     right-aligned menu landed flush against the left edge and read as cut off. */
+  .menu {
+    left: 12px;
+    right: 12px;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+  }
+  .footer {
+    padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+    gap: 10px;
+  }
+}
+
+/* Phone, portrait: a 74 px volume control cannot share a 315 px row with the
+   transport — squeezing it there put the slider under the next button. It gets
+   its own centred row instead, and becomes properly usable rather than a stub.
+   (Earlier this control was simply hidden below 380 px, which left a lone
+   speaker icon that read as a broken button.) */
+@media (max-width: 480px) and (orientation: portrait) {
+  :root {
+    /* the volume has its own row down here, so the cover gives back some height */
+    --cover: min(42vh, 340px);
+  }
+  .controls {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .volume {
+    position: static;
+    justify-content: center;
+    opacity: 0.85;
+  }
+  .volume input[type='range'] {
+    width: 128px;
+  }
+}
+
+/* Touch: nothing you have to aim at should be 22 px tall. */
+@media (hover: none) and (pointer: coarse) {
+  .chip {
+    min-height: 34px;
+    padding: 8px 12px;
+  }
+  .volume .spk {
+    width: 34px;
+    height: 34px;
+  }
+  .volume input[type='range'] {
+    height: 34px;
+  }
+  .footer {
+    min-height: 52px;
+  }
+  .footer .next {
+    padding: 9px 0;
+  }
+  .menu .row {
+    padding: 12px 12px;
+  }
+  .hit {
+    padding: 12px 2px;
+  }
+  .opt {
+    padding: 12px 14px;
+  }
+}
+
+/* Landscape on a phone: 393 px of height cannot stack a square cover, three
+   lines of type, a progress bar and the controls — the cover was collapsing to a
+   33 px sliver and the volume was landing on top of the transport. Side by side
+   instead, which is what a wide short screen is for. */
+@media (orientation: landscape) and (max-height: 540px) {
+  :root {
+    --cover: min(64vh, 260px);
+  }
+  .stage {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      'cover meta'
+      'cover bar'
+      'cover controls';
+    align-content: center;
+    justify-content: center;
+    gap: 10px 22px;
+    padding: 10px 18px;
+  }
+  .cover {
+    grid-area: cover;
+    height: var(--cover);
+    width: auto;
+    flex: none;
+    align-self: center;
+  }
+  .meta {
+    grid-area: meta;
+    width: auto;
+    text-align: left;
+    gap: 4px;
+  }
+  .meta .why {
+    justify-content: flex-start;
+  }
+  .title {
+    font-size: 18px;
+    -webkit-line-clamp: 1;
+  }
+  .bar {
+    grid-area: bar;
+    width: auto;
+  }
+  .controls {
+    grid-area: controls;
+    width: auto;
+  }
+  .transport {
+    justify-content: flex-start;
+    gap: 20px;
+  }
+  .notice {
+    padding-bottom: 2px;
   }
 }
 

@@ -90,7 +90,9 @@ export function Volume({ value, available, onChange, unavailableReason, onUnavai
       {/* Not disabled when unavailable: a control that explains itself beats a
           dead one. The slider stays inert, the speaker answers. */}
       <button className="spk" onClick={toggleMute} aria-label={available ? 'Mute' : 'Why is volume off?'}>
-        <Speaker level={available && known ? level : 0} />
+        {/* Unknown-but-available reads as the neutral level, not as muted: the
+            crossed-out speaker was appearing before the first poll answered. */}
+        <Speaker level={available ? level : 0} />
       </button>
       <input
         type="range"

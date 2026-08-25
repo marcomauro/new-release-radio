@@ -88,6 +88,7 @@ export function createEmbedProvider() {
   return {
     id: 'spotify-embed',
     label: 'Spotify preview',
+    shortLabel: 'preview',
     blurb: '30 second previews · no login',
     caps: new Set([CAPS.PREVIEW, CAPS.ARTWORK]),
 

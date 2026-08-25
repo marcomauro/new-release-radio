@@ -112,6 +112,7 @@ export function createConnectProvider() {
   return {
     id: 'spotify-connect',
     label: 'Spotify Connect',
+    shortLabel: 'Connect',
     blurb: 'full tracks on your Spotify device · Premium',
     caps: new Set([
       CAPS.FULL,

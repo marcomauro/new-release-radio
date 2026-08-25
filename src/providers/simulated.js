@@ -30,6 +30,7 @@ export function createSimulatedProvider({ speed = 8 } = {}) {
   return {
     id: 'simulated',
     label: 'Dry run',
+    shortLabel: 'dry run',
     blurb: `silent walk at ${speed}× · for tuning the rules`,
     caps: new Set([CAPS.SILENT, CAPS.ARTWORK, CAPS.SEEK, CAPS.VOLUME]),
 

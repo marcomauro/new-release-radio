@@ -17,9 +17,17 @@ import { gColor, gLabel } from './theme.js'
    the iFrame API replaces the element it is given, so the cage is what carries
    the styling) and driven entirely by the controls below. */
 
+// Touch + no hover: a phone or a tablet. Used for the one decision that really
+// differs there — Connect first, previews as a named fallback.
+const isTouchDevice = () =>
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(hover: none) and (pointer: coarse)').matches
+
 export default function App() {
   const radio = useRadio()
   const [panel, setPanel] = useState(false)
+  const [touch] = useState(isTouchDevice)
   const hostRef = useRef(null)
 
   const node = radio.current
@@ -92,7 +100,9 @@ export default function App() {
           {radio.ruleset.label}
         </button>
         <button className="chip" onClick={() => setPanel(true)} title={provider ? provider.blurb : ''}>
-          {provider ? provider.label : '—'}
+          {/* Both labels ship; CSS picks one by width, so no resize listener. */}
+          <span className="wide">{provider ? provider.label : '—'}</span>
+          <span className="narrow">{provider ? provider.shortLabel || provider.label : '—'}</span>
         </button>
       </div>
 
@@ -103,6 +113,8 @@ export default function App() {
           started={radio.started}
           playing={radio.playing}
           onPlay={radio.play}
+          connectFirst={touch && isPreview && radio.canConnect}
+          onConnect={radio.connectSpotify}
         />
 
         <div className="meta">
