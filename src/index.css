@@ -333,7 +333,9 @@ input {
   gap: 10px;
   padding: 18px;
   text-align: center;
-  background: rgba(8, 8, 10, 0.72);
+  /* Opaque enough that the placeholder initials behind it stop competing with
+     the text of the offer. */
+  background: rgba(8, 8, 10, 0.9);
 }
 
 .connect-big {
@@ -911,6 +913,15 @@ input {
   }
   .chip.out {
     max-width: 44vw;
+  }
+  /* Anchored to the viewport with a gutter instead of to the pill: at 360 px the
+     right-aligned menu landed flush against the left edge and read as cut off. */
+  .menu {
+    left: 12px;
+    right: 12px;
+    width: auto;
+    min-width: 0;
+    max-width: none;
   }
   .footer {
     padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
