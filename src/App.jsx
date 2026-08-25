@@ -74,6 +74,11 @@ export default function App() {
   const upNext = radio.upNext[0]
   const isPreview = !!(provider && provider.caps.has(CAPS.PREVIEW))
 
+  // The volume is pointless on a phone playing to itself (Spotify refuses the
+  // command, the buttons on the side already do it) and useful the moment the
+  // stream is on a speaker or a computer. So on touch it follows the output.
+  const showVolume = !touch || (!!radio.currentOutput && !radio.outputIsHandset)
+
   return (
     <div className="screen">
       <div
@@ -150,7 +155,7 @@ export default function App() {
               : 'this player does not expose a volume control')
           }
           onVolumeUnavailable={radio.explainVolume}
-          showVolume={!touch}
+          showVolume={showVolume}
         />
 
         {/* Spotify decodes the preview. The API replaces the inner element with

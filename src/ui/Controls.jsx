@@ -121,7 +121,7 @@ export default function Controls({
   showVolume = true,
 }) {
   return (
-    <div className="controls">
+    <div className={`controls${showVolume ? ' with-volume' : ''}`}>
       <div className="transport">
         <button className="ctl" onClick={onReseed} title="New station — start somewhere else">
           <Shuffle />

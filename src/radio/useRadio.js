@@ -643,6 +643,13 @@ export function useRadio() {
     // outputs
     outputs,
     currentOutput: provider && provider.currentOutput ? provider.currentOutput() : null,
+    // A handset sets its own volume: Spotify refuses the remote command, and the
+    // hardware buttons are the real control. The UI uses this to decide whether
+    // a volume slider is worth offering on a touch screen at all.
+    outputIsHandset: (() => {
+      const o = provider && provider.currentOutput ? provider.currentOutput() : null
+      return !!(o && (o.type === 'Smartphone' || o.type === 'Tablet'))
+    })(),
     canChooseOutput: !!(provider && provider.caps.has(CAPS.OUTPUTS) && status.authenticated),
     refreshOutputs,
     selectOutput,
