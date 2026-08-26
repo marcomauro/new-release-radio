@@ -14,7 +14,15 @@ const Cast = () => (
   </svg>
 )
 
-export default function OutputPill({ outputs, current, onSelect, onRefresh }) {
+// What the link is doing, said with one dot rather than an alarm. A mobile
+// network that drops requests is a normal condition for a radio, not a failure:
+// the music keeps playing on the device while this waits.
+const LINK_NOTE = {
+  degraded: 'the connection is dropping requests — playback continues, the radio is catching up',
+  offline: 'no connection — the radio picks up where it left off as soon as it is back',
+}
+
+export default function OutputPill({ outputs, current, onSelect, onRefresh, link = 'online' }) {
   const [open, setOpen] = useState(false)
   const box = useRef(null)
 
@@ -33,19 +41,21 @@ export default function OutputPill({ outputs, current, onSelect, onRefresh }) {
   }, [open])
 
   const label = current ? current.name : 'choose a device'
+  const down = link === 'degraded' || link === 'offline'
 
   return (
     <div className="pill-wrap" ref={box}>
       <button
-        className={`chip out${open ? ' on' : ''}`}
+        className={`chip out${open ? ' on' : ''}${down ? ` link-${link}` : ''}`}
         onClick={() => {
           setOpen((o) => !o)
           if (!open && onRefresh) onRefresh() // the list goes stale fast
         }}
-        title="Where the audio plays — pick a Spotify device"
+        title={down ? LINK_NOTE[link] : 'Where the audio plays — pick a Spotify device'}
       >
         <Cast />
         <span className="name">{label}</span>
+        {down ? <span className="link-dot" aria-label={LINK_NOTE[link]} /> : null}
         <span className="caret">▾</span>
       </button>
 

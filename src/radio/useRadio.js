@@ -396,6 +396,13 @@ export function useRadio() {
   /**
    * How much of the walk the platform should be holding right now, in tracks —
    * derived from how long we may be unable to top it up again.
+   *
+   * The horizon is measured over the QUEUE ALONE, deliberately: what is playing
+   * right now buys nothing, because when it ends we may be no more able to act
+   * than we are now. Counting it made a nine-minute track look like ten minutes
+   * of safety and left exactly one track queued behind it — after which Spotify
+   * autoplays and the station is no longer ours. (Caught by
+   * `scripts/net_tests.mjs` case 7, which is why it is written down here.)
    */
   const targetDepth = useCallback(() => {
     if (!station) return QUEUE_DEPTH.visible
@@ -406,15 +413,14 @@ export function useRadio() {
         ? HORIZON_MS.degraded
         : 0
     if (horizon <= 0) return QUEUE_DEPTH.visible
-    const s = snapRef.current || {}
-    let covered = Math.max(0, (s.duration || 0) - (s.position || 0))
+    let covered = 0
     let n = 0
     for (const u of station.upNext(QUEUE_DEPTH.max)) {
       if (covered >= horizon) break
       covered += (u.node.duration_sec || FALLBACK_TRACK_MS / 1000) * 1000
       n += 1
     }
-    return Math.max(QUEUE_DEPTH.visible, Math.min(QUEUE_DEPTH.max, n))
+    return Math.max(QUEUE_DEPTH.visible + 1, Math.min(QUEUE_DEPTH.max, n))
   }, [station])
 
   /**
@@ -601,17 +607,19 @@ export function useRadio() {
         if (raw && raw.artwork) setCover(raw.artwork)
 
         if (raw && raw.stale) {
-          // Nothing new is known — but the held state still names what is on
-          // air, so the queue can and must go on being fed. This is the branch
-          // that used to be unreachable, which is how a few seconds of bad
-          // signal ended with Spotify's autoplay running the station.
-          if (canQueue && snap.ref) await topUpQueue()
+          // Nothing new is known, and nothing is worth sending: the connection
+          // that just swallowed a read will swallow a queue command too, and
+          // spending its budget here delayed noticing the recovery by tens of
+          // seconds (net_tests case 4). What protects the queue is depth taken
+          // BEFORE the gap — targetDepth widens the moment the link degrades —
+          // and a top-up the instant an answer comes back, below.
           return
         }
 
         if (recovered) {
           await flushOutbox()
           await reconcileQueue()
+          await topUpQueue() // first thing after an outage: refill the platform
         }
 
         if (canQueue) {
@@ -967,11 +975,16 @@ export function useRadio() {
       ? 'Spotify is connected — switch the player to Connect for full tracks'
       : ''
 
+  // A dropped connection does not get the amber line: it is a state of the
+  // link, shown on the device pill, and it says so in words only when the user
+  // reaches for a control that cannot work right now.
+  const ambient = status.messageKind === 'network' ? '' : status.message
+
   return {
     phase,
     error,
     archive,
-    notice: notice || status.message || hint,
+    notice: notice || ambient || hint,
 
     provider,
     providers: providers || [],

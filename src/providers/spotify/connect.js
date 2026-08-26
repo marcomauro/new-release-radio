@@ -174,6 +174,9 @@ export function createConnectProvider() {
         available: true,
         authenticated: isLoggedIn() && !authError,
         message: notice.text,
+        // What kind of problem this is, so the UI can decide where it belongs.
+        // A dropped connection is a state of the link, not an error to shout.
+        messageKind: notice.kind,
         device: device ? device.name : null,
       }
     },

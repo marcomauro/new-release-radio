@@ -192,6 +192,47 @@ input {
   opacity: 0.7;
 }
 
+/* The state of the link, as a dot on the pill. A mobile network that comes and
+   goes is a normal condition for a radio: the music keeps playing on the device
+   while we wait, so this reports rather than alarms — amber and breathing while
+   requests are being dropped, dim and still when there is nothing at all. */
+.chip.out .link-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: #d39a3e;
+}
+
+.chip.out.link-degraded {
+  border-color: rgba(211, 154, 62, 0.45);
+}
+
+.chip.out.link-degraded .link-dot {
+  animation: link-pulse 1.6s ease-in-out infinite;
+}
+
+.chip.out.link-offline .link-dot {
+  background: var(--muted);
+  opacity: 0.7;
+}
+
+@keyframes link-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chip.out.link-degraded .link-dot {
+    animation: none;
+  }
+}
+
 .menu {
   position: absolute;
   top: calc(100% + 6px);
