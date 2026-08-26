@@ -8,6 +8,13 @@
    MUST be registered in the Spotify app dashboard for this repo's Pages URL —
    see README, "Spotify setup". A different client id can be injected at build
    time with VITE_SPOTIFY_CLIENT_ID without touching the code.
+
+   **"Could not ask" is not "was refused".** `acquireToken()` answers with a
+   discriminated result, never a bare null: a token, a transient network
+   failure, or a real rejection. Only the last one means the session is over.
+   Collapsing the two used to tell a user on a flaky mobile connection that
+   their session had expired — and hide the device picker — while the refresh
+   token was perfectly valid.
    -------------------------------------------------------------------------- */
 
 const ENV = (typeof import.meta !== 'undefined' && import.meta.env) || {}
@@ -27,6 +34,38 @@ const TOKEN_URL = 'https://accounts.spotify.com/api/token'
 const LS_TOKENS = 'nrr_sp_tokens'
 const LS_VERIFIER = 'nrr_sp_verifier'
 const LS_STATE = 'nrr_sp_state'
+
+// A token request that has not answered in this long will not answer at all.
+// Without a deadline, a stalled mobile connection holds the whole radio: every
+// Spotify call waits for a token first.
+const TOKEN_TIMEOUT_MS = 8000
+
+/** POST to the token endpoint with a deadline. Distinguishes silence from a no. */
+async function postToken(body) {
+  const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), TOKEN_TIMEOUT_MS) : null
+  try {
+    const r = await fetch(TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+      signal: ctrl ? ctrl.signal : undefined,
+    })
+    let data = null
+    try {
+      data = await r.json()
+    } catch (e) {
+      /* empty or truncated body */
+    }
+    return { ok: r.ok, status: r.status, data }
+  } catch (e) {
+    // Aborted by our own deadline, or the request never left the device: from
+    // here the two are the same thing — no answer.
+    return { ok: false, status: 0, data: null, network: true }
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
 
 /* --- PKCE ---------------------------------------------------------------- */
 
@@ -133,67 +172,97 @@ export async function completeLoginIfNeeded() {
     clean()
     return { completed: false, error: 'state_mismatch' }
   }
-  try {
-    const body = new URLSearchParams({
+  const res = await postToken(
+    new URLSearchParams({
       client_id: CLIENT_ID,
       grant_type: 'authorization_code',
       code,
       redirect_uri: REDIRECT_URI,
       code_verifier: verifier,
     })
-    const r = await fetch(TOKEN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body,
-    })
-    const j = await r.json()
-    if (!r.ok || !j.access_token) {
-      clean()
-      return { completed: false, error: (j && j.error) || 'token_exchange_failed' }
-    }
-    writeTokens({
-      access_token: j.access_token,
-      refresh_token: j.refresh_token,
-      expires_at: Date.now() + (j.expires_in || 3600) * 1000,
-      scope: j.scope || '',
-    })
-    localStorage.removeItem(LS_VERIFIER)
-    localStorage.removeItem(LS_STATE)
-    clean()
-    return { completed: true, error: '' }
-  } catch (e) {
+  )
+  const j = res.data
+  if (res.network) {
     clean()
     return { completed: false, error: 'network' }
   }
+  if (!res.ok || !j || !j.access_token) {
+    clean()
+    return { completed: false, error: (j && j.error) || 'token_exchange_failed' }
+  }
+  writeTokens({
+    access_token: j.access_token,
+    refresh_token: j.refresh_token,
+    expires_at: Date.now() + (j.expires_in || 3600) * 1000,
+    scope: j.scope || '',
+  })
+  localStorage.removeItem(LS_VERIFIER)
+  localStorage.removeItem(LS_STATE)
+  clean()
+  return { completed: true, error: '' }
 }
 
-/** Valid access token, refreshing when it is about to expire. */
-export async function getValidToken() {
-  const t = readTokens()
-  if (!t || !t.access_token) return null
-  if (Date.now() < (t.expires_at || 0) - 60000) return t.access_token
-  if (!t.refresh_token) return null
-  try {
-    const body = new URLSearchParams({
+/* --- acquiring a token --------------------------------------------------- */
+
+// One refresh at a time. Two concurrent refreshes are not just wasteful: Spotify
+// may rotate the refresh token, so the second call can be spending a credential
+// the first one has already replaced.
+let refreshing = null
+
+/**
+ * A refusal from the token endpoint, told apart from a bad moment.
+ * 5xx and 429 are the endpoint having a bad day; `invalid_grant` and friends are
+ * the grant itself being dead, which is the only case that ends the session.
+ */
+function classifyRefusal(res) {
+  if (res.network || res.status === 0) return 'network'
+  if (res.status === 429 || res.status >= 500) return 'network'
+  const code = (res.data && res.data.error) || ''
+  if (code === 'server_error' || code === 'temporarily_unavailable') return 'network'
+  return 'rejected'
+}
+
+async function doRefresh(t) {
+  const res = await postToken(
+    new URLSearchParams({
       client_id: CLIENT_ID,
       grant_type: 'refresh_token',
       refresh_token: t.refresh_token,
     })
-    const r = await fetch(TOKEN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body,
-    })
-    const j = await r.json()
-    if (!r.ok || !j.access_token) return null
-    writeTokens({
-      access_token: j.access_token,
-      refresh_token: j.refresh_token || t.refresh_token,
-      expires_at: Date.now() + (j.expires_in || 3600) * 1000,
-      scope: j.scope || t.scope || '',
-    })
-    return j.access_token
-  } catch (e) {
-    return null
+  )
+  const j = res.data
+  if (!res.ok || !j || !j.access_token) {
+    const error = classifyRefusal(res)
+    // Only a dead grant clears the credentials. A network failure must leave
+    // them exactly where they are, so the next attempt can succeed.
+    if (error === 'rejected') logout()
+    return { error, detail: (j && j.error) || '' }
   }
+  writeTokens({
+    access_token: j.access_token,
+    refresh_token: j.refresh_token || t.refresh_token,
+    expires_at: Date.now() + (j.expires_in || 3600) * 1000,
+    scope: j.scope || t.scope || '',
+  })
+  return { token: j.access_token }
+}
+
+/**
+ * A usable access token, or the reason there isn't one.
+ *
+ * @returns {Promise<{token?: string, error?: 'missing'|'network'|'rejected', detail?: string}>}
+ *   `missing`  — nobody is connected (no tokens stored at all);
+ *   `network`  — we could not ask; the session is presumed intact;
+ *   `rejected` — Spotify refused the grant; the session is over.
+ */
+export async function acquireToken() {
+  const t = readTokens()
+  if (!t || !t.access_token) return { error: 'missing' }
+  if (Date.now() < (t.expires_at || 0) - 60000) return { token: t.access_token }
+  if (!t.refresh_token) return { error: 'missing' }
+  if (refreshing) return refreshing
+  refreshing = doRefresh(t).finally(() => {
+    refreshing = null
+  })
+  return refreshing
 }
