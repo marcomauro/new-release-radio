@@ -314,18 +314,74 @@ input {
    phone, 225x33 in landscape), and driving from `height` with `max-width: 100%`
    clamps the width while the height stands (315x335 on a 360 px Android).
    So: the WIDTH is the single source — already bounded by vh through --cover —
-   the aspect ratio derives the height, and nothing is allowed to shrink it. */
+   the aspect ratio derives the height, and nothing is allowed to shrink it.
+
+   The box is also the perspective for the flip, which is why the sleeve surface
+   — background, radius, shadow — belongs to `.face` and not here: `overflow:
+   hidden` on a perspective parent clips a rotating plane. */
 .cover {
   position: relative;
   width: min(var(--cover), 100%);
   height: auto;
   aspect-ratio: 1;
+  flex: 0 0 auto;
+  perspective: 1400px;
+  transition: transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1), opacity 0.4s;
+}
+
+.cover[role='button'] {
+  cursor: pointer;
+}
+
+.cover:focus-visible {
+  outline: 2px solid var(--genre);
+  outline-offset: 6px;
+  border-radius: 6px;
+}
+
+.flip {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  transition: transform 0.65s cubic-bezier(0.3, 0.8, 0.25, 1);
+}
+
+.cover.flipped .flip {
+  transform: rotateY(180deg);
+}
+
+.face {
+  position: absolute;
+  inset: 0;
   border-radius: 4px;
   overflow: hidden;
   background: #17171a;
   box-shadow: 0 30px 70px -20px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.05);
-  flex: 0 0 auto;
-  transition: transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1), opacity 0.4s;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.face.back {
+  transform: rotateY(180deg);
+  background: #131316;
+  /* The facts adapt to the size of the SQUARE, not of the screen: the same
+     phone gives the sleeve 340 px in portrait and 230 px in landscape.
+     See the @container block at the end of this file. */
+  container-type: inline-size;
+}
+
+/* There is more of the archive than fits a square on a phone, so the facts
+   scroll — and the bottom fades, because a hard edge at the boundary reads as
+   the end of the list. The fade belongs to the face, which does not scroll. */
+.face.back::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 24px;
+  background: linear-gradient(to top, #131316, rgba(19, 19, 22, 0));
+  pointer-events: none;
 }
 
 .cover img {
@@ -430,6 +486,180 @@ input {
 .bigplay:hover {
   transform: scale(1.06);
   background: rgba(255, 255, 255, 0.12);
+}
+
+/* --- the back of the sleeve ---------------------------------------------- */
+
+/* Nobody taps a cover to find out whether it turns over. On a touch screen the
+   mark is always faintly there; with a pointer it comes up on hover. */
+.cover .turn {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  display: grid;
+  place-items: center;
+  font-family: ui-serif, Georgia, 'Times New Roman', serif;
+  font-size: 11px;
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(8, 8, 10, 0.45);
+  backdrop-filter: blur(3px);
+  opacity: 0;
+  transition: opacity 0.25s;
+  pointer-events: none;
+}
+
+.cover:hover .turn,
+.cover:focus-visible .turn {
+  opacity: 1;
+}
+
+.sleeve {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 13px 14px 30px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.sleeve .k {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.sleeve .facts {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.sleeve .row {
+  display: grid;
+  /* Sized in ch so the longest label ("danceable", "acoustic") never runs into
+     the value or the bar beside it — an em box is not the label's width. */
+  grid-template-columns: 9.5ch 1fr;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.sleeve .row .v {
+  color: var(--ink);
+}
+
+.sleeve em {
+  font-style: normal;
+  color: var(--dim);
+}
+
+/* The archive's audio features. The genre colour ties the bars to the room. */
+.sleeve .feats {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.sleeve .feat {
+  display: grid;
+  grid-template-columns: 9.5ch 1fr 2.2em;
+  gap: 8px;
+  align-items: center;
+}
+
+/* The label column is narrow, so these lose a little of the tracking. */
+.sleeve .feat .k {
+  letter-spacing: 0.06em;
+}
+
+.sleeve .feat .rail {
+  position: relative;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.sleeve .feat .fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--genre);
+}
+
+.sleeve .feat .v {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--dim);
+}
+
+.sleeve .block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+/* First in the sleeve: nothing above it to be ruled off from. */
+.sleeve .block.reason {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.sleeve .block .v {
+  color: var(--ink);
+}
+
+.sleeve .out {
+  align-self: flex-start;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  color: #1db954;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.sleeve .out:hover {
+  color: #1ed760;
+}
+
+/* A flip is decoration; the information is not. Turn without the rotation. */
+@media (prefers-reduced-motion: reduce) {
+  .flip,
+  .cover {
+    transition: none;
+  }
+  .cover.flipped .flip {
+    transform: none;
+  }
+  .face.back {
+    opacity: 0;
+    transform: none;
+    pointer-events: none;
+  }
+  .cover.flipped .face.back {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .cover.flipped .face.front {
+    opacity: 0;
+  }
 }
 
 .meta {
@@ -941,16 +1171,42 @@ input {
   }
 }
 
-/* Phones. The row has to hold three chips at 360 CSS px, so the wordmark steps
-   aside (the app is named in the tab and in the installed app anyway) and every
-   label switches to its short form. Nothing is clipped and nothing wraps. */
+/* Phones. Three chips cannot share a 360 CSS px row with the name, so the top
+   bar becomes two rows: the app is named on its own line, the controls sit
+   under it, and every label switches to its short form. Nothing is clipped and
+   nothing wraps. (The name used to be dropped here entirely, which left the
+   installed app with no title anywhere on screen.) */
 @media (max-width: 480px) {
   .topbar {
-    gap: 6px;
+    display: grid;
+    /* The device pill may shrink (its name can be long); the two small chips
+       take what they need and the last column absorbs the slack. */
+    grid-template-columns: minmax(0, auto) auto auto 1fr;
+    grid-template-areas:
+      'name name name name'
+      'out rules player .';
+    gap: 4px 6px;
     padding: 10px 12px;
   }
   .wordmark {
+    grid-area: name;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    color: var(--dim);
+  }
+  /* The flexible spacer has no job in a grid: the areas do the aligning. */
+  .topbar .spacer {
     display: none;
+  }
+  .topbar .pill-wrap,
+  .topbar > .chip.connect {
+    grid-area: out;
+  }
+  .topbar > .chip.accent {
+    grid-area: rules;
+  }
+  .topbar > .chip:last-of-type {
+    grid-area: player;
   }
   .chip .wide,
   .pill-wrap .wide {
@@ -991,6 +1247,18 @@ input {
   .chip {
     min-height: 34px;
     padding: 8px 12px;
+  }
+  /* There is no hover to reveal it, so the mark that says the sleeve turns over
+     is simply there — quiet, but there. */
+  .cover .turn {
+    opacity: 0.7;
+  }
+  /* A dense square of facts read at arm's length. */
+  .sleeve {
+    font-size: 11.5px;
+  }
+  .sleeve .out {
+    min-height: 40px;
   }
   .volume .spk {
     width: 34px;
@@ -1103,6 +1371,35 @@ input {
   }
   .notice {
     padding-bottom: 2px;
+  }
+}
+
+/* The back of the sleeve, when the sleeve itself is small — a phone in
+   landscape gives it a 230 px square, where the measures above make every value
+   wrap. A container query rather than a media query: what matters is the size of
+   the square, not the size of the screen.
+
+   It sits at the END of the file on purpose. The touch block above also sets
+   `.sleeve { font-size }` at the same specificity, and a phone in landscape
+   matches both — last one wins, and here that has to be this one. */
+@container (max-width: 290px) {
+  .sleeve {
+    font-size: 10.5px;
+    gap: 6px;
+    padding: 11px 12px 28px;
+  }
+  .sleeve .row,
+  .sleeve .feat {
+    gap: 6px;
+  }
+  .sleeve .row {
+    grid-template-columns: 8ch 1fr;
+  }
+  .sleeve .feat {
+    grid-template-columns: 8ch 1fr 2em;
+  }
+  .sleeve .out {
+    min-height: 32px;
   }
 }
 

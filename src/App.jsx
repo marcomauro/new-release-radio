@@ -121,6 +121,7 @@ export default function App() {
           onPlay={radio.play}
           connectFirst={touch && isPreview && radio.canConnect}
           onConnect={radio.connectSpotify}
+          why={radio.why}
         />
 
         <div className="meta">
