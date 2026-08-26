@@ -94,11 +94,16 @@ input {
   min-width: 0;
 }
 
+/* The masthead. Big enough to name the app rather than to whisper it, and still
+   grey: the deliberate exception to "everything that is not the music is small"
+   is the SIZE, not the colour. Tracking loosens as the size drops, the way a
+   small caps line needs more air than a large one. */
 .wordmark {
-  font-size: 10.5px;
-  letter-spacing: 0.16em;
+  font-size: 13px;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .spacer {
@@ -1185,14 +1190,16 @@ input {
     grid-template-areas:
       'name name name name'
       'out rules player .';
-    gap: 4px 6px;
-    padding: 10px 12px;
+    gap: 7px 6px;
+    padding: 12px 12px 10px;
   }
+  /* It has the row to itself here, so it can be the masthead properly. The
+     cover does not pay for it: --cover is bound by vh and by the width of the
+     screen, and on every phone tested the width is what wins. */
   .wordmark {
     grid-area: name;
-    font-size: 10px;
-    letter-spacing: 0.2em;
-    color: var(--dim);
+    font-size: 15px;
+    letter-spacing: 0.14em;
   }
   /* The flexible spacer has no job in a grid: the areas do the aligning. */
   .topbar .spacer {
