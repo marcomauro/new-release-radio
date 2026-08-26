@@ -29,7 +29,7 @@ version):
 | `id`, `label`, `blurb` | ✔ | identity and the one line shown in the panel |
 | `caps` | ✔ | `Set` of `CAPS` values — the engine branches on these, never on `id` |
 | `init()` | ✔ | finish a pending OAuth redirect, load an SDK |
-| `status()` | ✔ | `{ available, authenticated, message, device }` |
+| `status()` | ✔ | `{ available, authenticated, message, messageKind, device }` — `messageKind: 'network'` keeps a dropped connection off the notice line, where it belongs to the device pill instead |
 | `resolve(track)` | ✔ | archive track → platform ref (a URI, an URL, an internal id) |
 | `trackIdFromRef(ref)` | ✔ | the inverse: platform ref → archive id, or `null` |
 | `start(track)` | ✔ | play this track **now** |
@@ -38,6 +38,7 @@ version):
 | `authenticate()` | – | start a login flow (may navigate away) |
 | `enqueue(track)` | – | append after the current track (with `CAPS.QUEUE`) |
 | `skip()` | – | platform-native "next" (with `CAPS.QUEUE`) |
+| `queuedRefs()` | – | with `CAPS.QUEUE`: the refs the platform itself says it will play next, in order, or `null` when it cannot say. The engine reconciles its own record against this, because after an outage that record can be wrong in both directions |
 | `seek(ms)` | – | with `CAPS.SEEK` |
 | `setVolume(0..100)` | – | with `CAPS.VOLUME` |
 | `listOutputs()` / `outputs()` / `currentOutput()` / `selectOutput(id)` | – | with `CAPS.OUTPUTS`: the device pill in the top bar is built from these, so a new platform gets it for free. Return `{ id, name, kind, active, volume, supportsVolume }`. |
@@ -59,10 +60,40 @@ version):
   artwork,    // { url, fallback } when the platform hands it to you for free
   message,    // human-readable status ("no active device", …)
   authError,  // the session died: the UI offers to reconnect
+  stale,      // WE COULD NOT ASK — nothing else in here is news
   volume,        // 0-100 or null when unknown
   volumeAvailable, // false disables the slider (and the UI explains why)
 }
 ```
+
+`stale` decides how the whole snapshot is read. It means the platform did not
+answer — the request never left, or it timed out — and the engine keeps the
+state it already had, moving the position on the local clock instead. Everything
+else in a stale snapshot is ignored, so a provider that cannot reach its
+platform returns `staleSnapshot(message)` and nothing more.
+
+**Never report silence as `playing: false`.** A refusal changes what is true; a
+lost request only changes what you know. Reporting the second as the first is
+what made a few seconds of bad mobile signal look like a stopped radio, put a ▶
+on screen while Spotify was playing, and turned the next tap into a restart.
+
+### Result
+
+Every command — `start`, `enqueue`, `skip`, `pause`, `resume`, `seek`,
+`setVolume`, `selectOutput` — answers with:
+
+```js
+{ ok, kind, message }   // kind: '' | 'network' | 'http' | 'auth'
+```
+
+`kind: 'network'` is the one the engine treats differently: a command that may
+never have arrived can be replayed when the connection returns (the user's
+volume, moving the stream to another device), while one that was *refused* must
+not be. Playback commands are never replayed either way — a duplicate `next` is
+audible, and a lost answer cannot be told from a lost request.
+
+Helpers for all three shapes are in `providers/provider.js`: `makeSnapshot`,
+`staleSnapshot`, `ok`, `failed`.
 
 ### Capabilities decide the engine's strategy
 

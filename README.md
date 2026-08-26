@@ -67,6 +67,20 @@ node scripts/walk.mjs -n 500 --stats-only   # repeats, artist spread, genre runs
 
 Same seed + same preset + same archive = the same walk, every time.
 
+Check what happens when the network comes and goes — the hardest thing to test by
+hand, and the source of the worst bug this app has had:
+
+```bash
+node scripts/net_tests.mjs           # 8 cases, ~5 minutes
+node scripts/net_tests.mjs --only 3  # just the recovery case
+node scripts/net_tests.mjs --headed  # watch it happen
+```
+
+Spotify is stubbed at the network boundary and keeps real state — a device, a
+current track, an actual queue — so every check asserts on what the app *sent to
+the device* or what the screen *says*. Needs a Chromium that Playwright can
+drive; see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), "Verification".
+
 ### Production build
 
 ```bash
@@ -262,6 +276,7 @@ new-release-radio/
 ├── scripts/
 │   ├── sync_graph.py              # refresh + validate the snapshot
 │   ├── walk.mjs                   # run the walk in the terminal
+│   ├── net_tests.mjs              # the radio on a network that comes and goes
 │   └── make_icons.mjs             # re-render the PNG icons from one SVG source
 ├── src/
 │   ├── core/
@@ -269,7 +284,7 @@ new-release-radio/
 │   │   ├── rules.js               # CONSTRAINTS + SCORERS + presets
 │   │   └── walker.js              # the station: one step at a time
 │   ├── providers/
-│   │   ├── provider.js            # the playback contract (CAPS, Snapshot)
+│   │   ├── provider.js            # the playback contract (CAPS, Snapshot, Result)
 │   │   ├── index.js               # the registry
 │   │   ├── simulated.js           # dry run: the radio with the sound off
 │   │   └── spotify/               # auth (PKCE) · api · connect · embed · artwork

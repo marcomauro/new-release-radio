@@ -97,6 +97,7 @@ export default function App() {
             current={radio.currentOutput}
             onSelect={radio.selectOutput}
             onRefresh={radio.refreshOutputs}
+            link={radio.link}
           />
         ) : radio.canConnect ? (
           <ConnectPill onConnect={radio.connectSpotify} />

@@ -83,12 +83,70 @@ Not a smaller screen — a different set of rules:
 
 | what changes | consequence |
 | --- | --- |
-| timers freeze when the app leaves the screen | the platform queue is filled to 3 while `document.hidden`, and the walk fast-forwards on return (`useRadio.js`, `QUEUE_DEPTH`) |
+| timers freeze when the app leaves the screen | the platform queue is filled to cover ten minutes of music while `document.hidden`, and the walk fast-forwards on return (`useRadio.js`, `targetDepth`) |
+| the network comes and goes | the next section — the hardest case in the whole app |
 | a cross-origin iframe wants the tap inside itself | previews are the declared fallback on touch; Connect is offered first |
 | fingers, not pointers | 34 px minimum on anything tappable, under `@media (hover: none)` |
 | `100%` height measures the large viewport | `100dvh`, with `100%` as the fallback |
 | a square that must fit two dimensions | the cover is driven by **height** + `aspect-ratio`; width-driven, a flex column squashes it (315×265 on a short phone, 225×33 in landscape) |
 | landscape is wide and short | the stage becomes a two-column grid: cover left, everything else right |
+
+## A network that answers sometimes
+
+The hard case is not a network that is down — it is one that drops one request in
+five. The whole design rests on one distinction:
+
+> **A refusal changes what is true. A lost request only changes what we know.**
+
+Collapsing the two is what produced the worst bug this app has had. A dropped
+request threw the browser's raw `TypeError`, the provider turned that into an
+empty snapshot, and the engine wrote it into state — so the screen said nothing
+was playing while Spotify played on, and the obvious next tap sent a `play` that
+restarted the track and threw away the queue.
+
+Where the distinction lives now:
+
+| layer | what it does |
+| --- | --- |
+| `providers/spotify/api.js` | one error shape, `{ kind: 'network' \| 'http' \| 'auth' }`; a deadline on every request (a stalled mobile connection hangs rather than failing); retries chosen per verb — reads freely, `queue` and `volume` once because the result is reconciled, `play`/`next`/`resume`/`seek` never, because a duplicate is audible |
+| `providers/spotify/auth.js` | `acquireToken()` answers `token` / `network` / `rejected`. Only a rejection ends the session — a blip during the one minute an hour when a refresh is due used to be reported as "session expired" |
+| `providers/spotify/connect.js` | a lost request returns `staleSnapshot()`, never `playing: false`; the notice is classified so transient kinds clear themselves; a network failure never marks a device as refusing volume |
+| `radio/useRadio.js` | a stale snapshot is merged onto the last known state, position carried on the local clock (clamped at 45 s, then frozen); the link has a state that sets the poll cadence; the queue is topped up **during** an outage; user intents are replayed on recovery, playback commands never |
+
+Two consequences worth stating on their own:
+
+- **The queue is what keeps the station ours.** If it runs dry, Spotify autoplays
+  and the walk starts *following* the player instead of driving it. So depth is
+  measured in minutes of music, and the horizon counts the queue only — what is
+  playing right now buys nothing, because when it ends we may be no more able to
+  act than we are now.
+- **The connection is not an error.** A dropped request is a normal condition for
+  a radio on a train. It shows as a state of the device pill, not as an amber
+  banner, and it says so in words only when the user reaches for a control that
+  cannot work yet.
+
+## Verification
+
+Anything the sandbox cannot reach gets a stub, because a comment is not evidence.
+The rule was learned the hard way: styling the Spotify embed's host element was
+"verified" in an environment where the iFrame API never loaded, so nothing was
+ever measured.
+
+| script | what it proves |
+| --- | --- |
+| `scripts/walk.mjs` | the walk itself, in the terminal, with `--explain` and `--stats-only`. Runs in the deploy workflow as a smoke test |
+| `scripts/net_tests.mjs` | what the radio does when the network comes and goes — Spotify stubbed at the network boundary with real state (a device, a current track, an actual queue), driven by Playwright. Every check asserts on what was **sent to the device** or what the screen **says** |
+
+`net_tests.mjs` covers the eight cases that matter: a poll failing mid-track,
+a tap on play during an outage, recovery after Spotify has moved on, a request
+that never answers, a token refresh that fails for want of network, a refresh
+token that is genuinely dead, a pocket plus an outage, and a real
+`context.setOffline()` transition. It found a bug in the queue-depth rule that
+reading the code had not: a nine-minute track made the horizon look covered and
+left one track queued behind it.
+
+It needs a Chromium and is a development tool — the deploy workflow does not run
+it.
 
 ## Failure, by design
 
@@ -97,8 +155,11 @@ The radio should degrade, never break:
 - the live archive is unreachable → the vendored snapshot answers, with a notice
   that fades;
 - cover art fails at any of its three stages → genre-tinted placeholder;
-- the Spotify token dies mid-session → `poll()` reports `authError` and the panel
-  offers to reconnect; the walk itself keeps going;
+- the Spotify token is genuinely refused → `poll()` reports `authError` and the
+  panel offers to reconnect; the walk itself keeps going. A token refresh that
+  merely *could not be sent* is not that, and changes nothing;
+- the connection drops mid-track → the screen keeps what it knew, the queue keeps
+  being fed, and nothing is restarted;
 - no active Spotify device → a plain message, and previews remain available;
 - a corner of the graph is exhausted → the walk jumps, and says so;
 - constraints make a step impossible → they are relaxed in a documented order

@@ -410,11 +410,20 @@ export function createStation({ index, ruleset = DEFAULT_RULESET, seedNode, seed
       this.noteSkip(true)
       return this.advance()
     },
-    /** Jump the walk onto a specific track (search result, history click). */
+    /**
+     * Jump the walk onto a specific track (search result, history click), or
+     * onto whatever the platform decided to play (`kind: 'device'`).
+     *
+     * The caption says which it was. It used to read "restart" for the device
+     * case, which was both wrong and alarming: nothing had restarted — the walk
+     * had followed the player somewhere it did not choose, and that is the one
+     * thing the line needs to admit.
+     */
     jumpTo(id, kind = 'manual') {
       const node = index.node(id)
       if (!node) return null
-      state = commit(state, index, node, { kind, text: kind === 'manual' ? 'picked by hand' : 'restart', rule: null })
+      const text = kind === 'manual' ? 'picked by hand' : 'followed your player'
+      state = commit(state, index, node, { kind, text, rule: null })
       queue = []
       fill()
       emit()
