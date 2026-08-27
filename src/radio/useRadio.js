@@ -616,6 +616,20 @@ export function useRadio() {
           return
         }
 
+        // Repeat or shuffle is fatal to a walk, and neither is ours: they live
+        // on the user's player and survive between sessions. With repeat on, the
+        // one-track context the station started from replays the moment the
+        // queue runs out — a station that loops its own first track.
+        if (
+          canQueue &&
+          provider.enforceModes &&
+          ((snap.repeat && snap.repeat !== 'off') || snap.shuffle === true)
+        ) {
+          const r = await provider.enforceModes()
+          // A device that refuses is the user's to fix, from the Spotify app.
+          if (r && r.ok === false && r.kind !== 'network') flash(r.message, 12000)
+        }
+
         if (recovered) {
           await flushOutbox()
           await reconcileQueue()
@@ -1019,6 +1033,10 @@ export function useRadio() {
     // error — a dropped request is not a failure of the radio.
     link,
     stale: !!snapshot.stale,
+
+    // the platform's own playback modes, which a walk needs off
+    repeat: snapshot.repeat || null,
+    shuffle: snapshot.shuffle === true,
 
     // volume
     volume,

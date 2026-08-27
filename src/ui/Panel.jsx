@@ -182,6 +182,30 @@ export default function Panel({ radio, onClose }) {
             </>
           )}
 
+          {/* Repeat and shuffle belong to the user's Spotify player, not to us,
+              and they survive between sessions. Repeat is the one that matters:
+              the station starts a one-track context, so with repeat on the
+              player returns to the FIRST track of the session the moment the
+              queue runs out. The radio turns both off and keeps them off — this
+              line exists so the state is visible rather than inferred. */}
+          {radio.canChooseOutput && (radio.repeat || radio.shuffle) && (
+            <>
+              <h2>Spotify modes</h2>
+              <p className="info">
+                repeat <strong>{radio.repeat || '—'}</strong> · shuffle{' '}
+                <strong>{radio.shuffle ? 'on' : 'off'}</strong>
+                {radio.repeat && radio.repeat !== 'off' ? (
+                  <>
+                    {' '}
+                    — a walk cannot repeat: the radio is turning it off. If it comes
+                    back, this device is refusing, and it has to go off in the Spotify
+                    app.
+                  </>
+                ) : null}
+              </p>
+            </>
+          )}
+
           {radio.canChooseOutput && (
             <>
               <h2>Play on</h2>
