@@ -178,7 +178,28 @@ export default function App() {
         )}
       </div>
 
-      {radio.notice ? <div className="notice">{radio.notice}</div> : null}
+      {/* Two radios on one Spotify account. There is no lock to take — the phone
+          and the desktop share nothing but Spotify itself — so the app detects
+          it, stops steering, and asks. Guessing here would either fight the
+          other instance or silently stop being the thing you are hearing. */}
+      {radio.contended ? (
+        <div className="contend">
+          <span>
+            another New Release Radio is steering this Spotify account — this one
+            has stopped sending commands
+          </span>
+          <span className="acts">
+            <button className="chip accent" onClick={radio.takeOver}>
+              steer from here
+            </button>
+            <button className="chip" onClick={radio.standDown}>
+              just listen
+            </button>
+          </span>
+        </div>
+      ) : radio.notice ? (
+        <div className="notice">{radio.notice}</div>
+      ) : null}
 
       <div className="footer">
         <span className="label">next</span>

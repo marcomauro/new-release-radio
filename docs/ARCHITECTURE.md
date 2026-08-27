@@ -132,6 +132,30 @@ Two consequences worth stating on their own:
   on the account and survive between sessions, so the radio sets them off when a
   station starts, watches them on every poll, and after three refusals says which
   one is stuck and where to fix it.
+
+### Two radios, one account
+
+A phone and a desktop can both be running this app against the same Spotify
+account, and then both are steering: each sees a track it did not choose, calls
+`play()`, and wipes the other's queue. There is **no lock to take** — the two
+devices share nothing but Spotify itself, `localStorage` is per-device, and this
+app has no server by design. A shared lease would mean a backend.
+
+So it is **detected, not enforced**, and the user decides:
+
+- the signature is a platform queue holding **archive tracks we never handed
+  over**. Spotify's own autoplay suggests from the whole catalogue, of which the
+  archive is a rounding error; a person pressing next queues nothing at all. Two
+  foreign archive tracks is conclusive on its own; one is enough when tracks we
+  handed over vanished at the same time, which is what `play()` from elsewhere
+  looks like;
+- on detection the radio **stands down first and asks second** — two radios
+  fighting over one account is worse than one radio waiting — and offers *steer
+  from here* or *just listen*. While standing down it sends nothing and only
+  follows, so the screen stays truthful;
+- the accusation is deliberately hard to trigger and easy to answer. A false
+  positive costs one line the user dismisses; guessing would either fight the
+  other instance or silently stop being the thing they are hearing.
 - **The connection is not an error.** A dropped request is a normal condition for
   a radio on a train. It shows as a state of the device pill, not as an amber
   banner, and it says so in words only when the user reaches for a control that
