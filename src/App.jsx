@@ -113,16 +113,23 @@ export default function App() {
       </div>
 
       <div className="stage">
-        <Cover
-          cover={radio.cover}
-          node={node}
-          started={radio.started}
-          playing={radio.playing}
-          onPlay={radio.play}
-          connectFirst={touch && isPreview && radio.canConnect}
-          onConnect={radio.connectSpotify}
-          why={radio.why}
-        />
+        {/* The cover gets a SLOT, not a size of its own. The slot takes whatever
+            height the stage has left over, and the cover is the largest square
+            that fits inside it (see `.cover-slot`, `.cover`). Sized from the
+            viewport instead, it could not shrink when the window got short — it
+            overflowed upward and sat on top of the pills. */}
+        <div className="cover-slot">
+          <Cover
+            cover={radio.cover}
+            node={node}
+            started={radio.started}
+            playing={radio.playing}
+            onPlay={radio.play}
+            connectFirst={touch && isPreview && radio.canConnect}
+            onConnect={radio.connectSpotify}
+            why={radio.why}
+          />
+        </div>
 
         <div className="meta">
           <div className="title">{node ? node.title : '—'}</div>

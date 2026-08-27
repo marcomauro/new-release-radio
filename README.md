@@ -78,8 +78,18 @@ node scripts/net_tests.mjs --headed  # watch it happen
 
 Spotify is stubbed at the network boundary and keeps real state — a device, a
 current track, an actual queue — so every check asserts on what the app *sent to
-the device* or what the screen *says*. Needs a Chromium that Playwright can
-drive; see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), "Verification".
+the device* or what the screen *says*.
+
+And that the layout holds at every window size — the square cover has broken four
+times, each time invisibly at whatever size the author happened to have open:
+
+```bash
+node scripts/fit_tests.mjs           # 11 windows, ~1 minute
+node scripts/fit_tests.mjs --shots /tmp/shots
+```
+
+Both need a Chromium that Playwright can drive; see
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), "Verification".
 
 ### Production build
 
@@ -277,6 +287,7 @@ new-release-radio/
 │   ├── sync_graph.py              # refresh + validate the snapshot
 │   ├── walk.mjs                   # run the walk in the terminal
 │   ├── net_tests.mjs              # the radio on a network that comes and goes
+│   ├── fit_tests.mjs              # the layout at eleven window sizes
 │   └── make_icons.mjs             # re-render the PNG icons from one SVG source
 ├── src/
 │   ├── core/
