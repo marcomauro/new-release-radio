@@ -314,19 +314,37 @@ input {
   min-height: 0;
 }
 
-/* Square, and it has to stay square on every screen. Two ways get this wrong:
-   `flex: 0 1 auto` lets a flex column squash the height (315x265 on a short
-   phone, 225x33 in landscape), and driving from `height` with `max-width: 100%`
-   clamps the width while the height stands (315x335 on a 360 px Android).
-   So: the WIDTH is the single source — already bounded by vh through --cover —
-   the aspect ratio derives the height, and nothing is allowed to shrink it.
+/* The cover's slot: it takes the height the stage has left after the type, the
+   progress line and the controls, and it is a SIZE CONTAINER — so the square
+   inside can be measured against both of the slot's dimensions.
+
+   This is the fix for a bug that survived three attempts at the square. The
+   cover could not shrink (by design: `flex: 0 1 auto` used to squash it to
+   315×265, and driving from `height` clamped the width instead), and its size
+   came from the viewport (`58vh`). So on a window that was wide enough but not
+   TALL enough, the cover overflowed the stage — and since the stage centres its
+   contents, it overflowed *upward*, over the top bar and its pills. Bounding it
+   by the leftover space instead of by the viewport makes the case impossible. */
+.cover-slot {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  display: grid;
+  place-items: center;
+  container-type: size;
+}
+
+/* Square, and it has to stay square on every screen. The width is the single
+   source — the smallest of the intended size, the slot's width and the slot's
+   height — and the aspect ratio derives the height from it. Nothing inside may
+   shrink it.
 
    The box is also the perspective for the flip, which is why the sleeve surface
    — background, radius, shadow — belongs to `.face` and not here: `overflow:
    hidden` on a perspective parent clips a rotating plane. */
 .cover {
   position: relative;
-  width: min(var(--cover), 100%);
+  width: min(var(--cover), 100cqw, 100cqh);
   height: auto;
   aspect-ratio: 1;
   flex: 0 0 auto;
@@ -364,15 +382,18 @@ input {
   box-shadow: 0 30px 70px -20px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.05);
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
+  /* Each face is a container, so what is drawn on it scales with the SQUARE
+     rather than with the intended size: the cover is now often smaller than
+     --cover, and the placeholder initials were sized from the latter. */
+  container-type: inline-size;
 }
 
 .face.back {
   transform: rotateY(180deg);
   background: #131316;
   /* The facts adapt to the size of the SQUARE, not of the screen: the same
-     phone gives the sleeve 340 px in portrait and 230 px in landscape.
-     See the @container block at the end of this file. */
-  container-type: inline-size;
+     phone gives the sleeve 340 px in portrait and 230 px in landscape — the
+     container declaration is on `.face`, see the @container block at the end. */
 }
 
 /* There is more of the archive than fits a square on a phone, so the facts
@@ -408,7 +429,7 @@ input {
   display: grid;
   place-items: center;
   font-family: ui-serif, Georgia, 'Times New Roman', serif;
-  font-size: calc(var(--cover) / 5);
+  font-size: 20cqw;
   letter-spacing: 0.02em;
   color: rgba(255, 255, 255, 0.62);
   background: linear-gradient(
@@ -513,11 +534,13 @@ input {
   color: rgba(255, 255, 255, 0.8);
   background: rgba(8, 8, 10, 0.45);
   backdrop-filter: blur(3px);
-  opacity: 0;
+  opacity: 0.45;
   transition: opacity 0.25s;
   pointer-events: none;
 }
 
+/* It was hover-only, which on a desktop meant the flip was invisible until you
+   happened to sweep the mouse across the artwork. */
 .cover:hover .turn,
 .cover:focus-visible .turn {
   opacity: 1;
@@ -991,14 +1014,19 @@ input {
   z-index: 10;
   overflow-y: auto;
   animation: fade 0.22s ease;
+  /* The column inset lives HERE, not on the children. It used to be their
+     padding, which any child setting a `padding` shorthand silently wiped — the
+     search field did exactly that, so its text and its underline ran to the
+     window edge while everything around it was inset. A gutter on the scroll
+     container cannot be overridden by accident. */
+  padding-left: 18px;
+  padding-right: 18px;
 }
 
 .panel > * {
   max-width: 620px;
   margin-left: auto;
   margin-right: auto;
-  padding-left: 18px;
-  padding-right: 18px;
 }
 
 .panel > .head {
@@ -1021,8 +1049,8 @@ input {
   text-transform: uppercase;
   color: var(--dim);
   font-weight: 400;
-  /* margin-left/right stay auto (see `.panel > *`) so headings line up with
-     the content column instead of hugging the window edge. */
+  /* margin-left/right stay auto (see `.panel > *`) so headings line up with the
+     content column; the gutter itself comes from `.panel`. */
   margin-top: 24px;
   margin-bottom: 10px;
 }
@@ -1105,6 +1133,10 @@ input {
 }
 
 .search {
+  /* Block, or the auto margins from `.panel > *` compute to zero and the field
+     sits at the left of the window while every heading around it is centred in
+     the 620 px column. An <input> is inline-block by default. */
+  display: block;
   width: 100%;
   background: transparent;
   border: 0;
@@ -1330,7 +1362,7 @@ input {
    instead, which is what a wide short screen is for. */
 @media (orientation: landscape) and (max-height: 540px) {
   :root {
-    --cover: min(64vh, 260px);
+    --cover: 260px;
   }
   .stage {
     display: grid;
@@ -1343,13 +1375,21 @@ input {
     justify-content: center;
     gap: 10px 22px;
     padding: 10px 18px;
+    /* THE STAGE is the container here, not the slot. Side by side, the slot
+       only spans the rows the type occupies, so measuring the square against it
+       shrank the cover to the height of three lines of text (154 px, even on a
+       wide desktop window). The stage's own height is the honest bound. */
+    container-type: size;
   }
-  .cover {
+  .cover-slot {
     grid-area: cover;
-    width: min(var(--cover), 42vw);
-    height: auto;
+    container-type: normal;
+    width: min(42vw, var(--cover), 100cqh);
     flex: none;
     align-self: center;
+  }
+  .cover {
+    width: 100%;
   }
   .meta {
     grid-area: meta;

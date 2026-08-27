@@ -88,7 +88,7 @@ Not a smaller screen — a different set of rules:
 | a cross-origin iframe wants the tap inside itself | previews are the declared fallback on touch; Connect is offered first |
 | fingers, not pointers | 34 px minimum on anything tappable, under `@media (hover: none)` |
 | `100%` height measures the large viewport | `100dvh`, with `100%` as the fallback |
-| a square that must fit two dimensions | the cover is driven by **height** + `aspect-ratio`; width-driven, a flex column squashes it (315×265 on a short phone, 225×33 in landscape) |
+| a square that must fit two dimensions | the cover is the largest square that fits the space **left over**: `.cover-slot` is a size container and the cover is `min(--cover, 100cqw, 100cqh)`. Sized from the viewport it could not shrink, and on a short window it overflowed upward onto the pills |
 | landscape is wide and short | the stage becomes a two-column grid: cover left, everything else right |
 
 ## A network that answers sometimes
@@ -136,6 +136,7 @@ ever measured.
 | --- | --- |
 | `scripts/walk.mjs` | the walk itself, in the terminal, with `--explain` and `--stats-only`. Runs in the deploy workflow as a smoke test |
 | `scripts/net_tests.mjs` | what the radio does when the network comes and goes — Spotify stubbed at the network boundary with real state (a device, a current track, an actual queue), driven by Playwright. Every check asserts on what was **sent to the device** or what the screen **says** |
+| `scripts/fit_tests.mjs` | whether the layout holds at eleven window sizes: the cover square and clear of the top bar, the title, the controls and the footer; the sleeve turning on a click; the panel's search field inside its column |
 
 `net_tests.mjs` covers the eight cases that matter: a poll failing mid-track,
 a tap on play during an outage, recovery after Spotify has moved on, a request
@@ -145,8 +146,17 @@ token that is genuinely dead, a pocket plus an outage, and a real
 reading the code had not: a nine-minute track made the horizon look covered and
 left one track queued behind it.
 
-It needs a Chromium and is a development tool — the deploy workflow does not run
-it.
+`fit_tests.mjs` exists because the square cover has broken four times, each time
+differently and each time invisibly at whatever window size the author happened
+to have open: squashed by a flex column, clamped on one axis while the other
+stood, collapsed to a sliver in landscape, and finally overflowing *upward* onto
+the top bar on a window that was wide enough but not tall enough. The cover is
+now bounded by the space actually left for it (`.cover-slot` is a size container)
+rather than by the viewport, which makes that last case impossible rather than
+unlikely.
+
+Both need a Chromium and are development tools — the deploy workflow does not run
+them.
 
 ## Failure, by design
 
