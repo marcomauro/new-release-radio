@@ -101,7 +101,7 @@ const item = (id) => {
   const n = nodeById.get(id)
   return {
     id,
-    name: (n && n.title) || id,
+    name: (n && n.title) || `Something else (${id.slice(0, 6)})`,
     duration_ms: Math.round(((n && n.duration_sec) || 210) * 1000),
     uri: `spotify:track:${id}`,
     artists: [{ name: (n && n.artist) || 'unknown' }],
@@ -110,6 +110,13 @@ const item = (id) => {
 }
 
 const idFromUri = (uri) => (uri || '').replace('spotify:track:', '')
+
+// Tracks another radio might have queued: archive tracks, chosen from the far
+// end of the file so our own walk is very unlikely to pick them next.
+const OTHER_RADIO = graph.nodes.slice(-2).map((n) => n.id)
+// And what Spotify's own autoplay queues: tracks from the catalogue at large,
+// which the archive has never heard of.
+const SUGGESTED = ['0aaaaaaaaaaaaaaaaaaaa1', '0aaaaaaaaaaaaaaaaaaaa2']
 
 /** Answer one Spotify Web API request against the world. */
 function answer(world, method, path, search, body) {
@@ -658,6 +665,60 @@ export default async function run() {
       check('a full queue means it did not run out', world.playing === false,
         `playing=${world.playing}`)
       check('the track was left alone', world.current === onAir)
+      await context.close()
+    }
+
+    /* 15 — another instance of the radio is driving the same account */
+    if (want(15)) {
+      console.log('\n15 · a second New Release Radio queues onto the same account')
+      const world = makeWorld(startId)
+      const { context, page } = await openRadio(browser, world, { startId })
+      await settle(page, world)
+      // What the other instance leaves behind: its own walk, in our queue.
+      world.queue.push(...OTHER_RADIO)
+
+      // It is noticed on the next audit of the platform's queue, not on the next
+      // poll: one extra request per audit cycle, not one per 2.5 seconds.
+      let noticed = true
+      try {
+        await page.waitForSelector('.contend', { timeout: 40000 })
+      } catch (e) {
+        noticed = false
+      }
+      check('the radio noticed', noticed)
+      const bar = noticed ? await page.locator('.contend').innerText() : ''
+      check('it says what happened and offers a choice',
+        /another new release radio/i.test(bar) && /steer from here/i.test(bar) && /just listen/i.test(bar),
+        bar.replace(/\n/g, ' | '))
+
+      const atNotice = world.calls.filter((c) => c.includes('POST /me/player/queue')).length
+      await sleep(9000)
+      const after = world.calls.filter((c) => c.includes('POST /me/player/queue')).length
+      check('it stopped steering', after === atNotice, `${after - atNotice} queue commands after`)
+
+      // "steer from here": it takes charge and refills.
+      if (noticed) {
+        await page.locator('.contend .chip.accent').click()
+        await sleep(5000)
+        const resumed = world.calls.filter((c) => c.includes('POST /me/player/queue')).length
+        check('taking over resumes it', resumed > after, `${resumed - after} queue commands after taking over`)
+        check('the question is gone', (await page.locator('.contend').count()) === 0)
+      }
+      await context.close()
+    }
+
+    /* 16 — Spotify's own autoplay is not another radio */
+    if (want(16)) {
+      console.log('\n16 · the queue fills with Spotify suggestions, not archive tracks')
+      const world = makeWorld(startId)
+      const { context, page } = await openRadio(browser, world, { startId })
+      await settle(page, world)
+      // Autoplay suggests from the whole catalogue: nothing the archive knows.
+      world.queue.push(...SUGGESTED)
+      await sleep(9000)
+      check('no accusation was made', (await page.locator('.contend').count()) === 0)
+      check('and it kept steering',
+        world.calls.filter((c) => c.includes('POST /me/player/queue')).length >= 1)
       await context.close()
     }
 
