@@ -66,10 +66,34 @@ function makeWorld(startId) {
     current: startId,
     position: 12000,
     queue: [], // track ids Spotify holds, in order
+    // The CONTEXT: what `play(uris)` established. A real player falls back to it
+    // when the queue runs out — and the radio starts a context of ONE track, so
+    // that fallback replays the first track of the session. This is the model
+    // the earlier stub was missing, and the reason it could not reproduce
+    // "playback went back to the first track".
+    context: [startId],
+    // The user's own player modes. They live on the account, survive between
+    // sessions, and the radio does not own them.
+    repeat: 'off', // 'off' | 'track' | 'context'
+    shuffle: false,
+    // A device that refuses to change them (some do), so the app has to say so.
+    refuseModes: false,
     volume: DEVICE.volume_percent,
     tokenMode: 'ok', // 'ok' | 'fail' | 'invalid_grant'
     seen: [], // every request the stub was asked for, fulfilled or not
     calls: [], // every request it actually answered: `${method} ${path}`
+  }
+}
+
+/** What a real player does when the appended queue is exhausted. */
+function afterQueue(world) {
+  if (world.repeat === 'track') return // the same track again
+  if (world.repeat === 'context' || world.repeat === 'off') {
+    // Repeat off ends playback; repeat on context replays it. Both are worth
+    // modelling, and with a one-track context they look the same from here.
+    world.current = world.context[0]
+    world.position = 0
+    world.playing = world.repeat === 'context'
   }
 }
 
@@ -97,6 +121,8 @@ function answer(world, method, path, search, body) {
         device: { ...DEVICE, volume_percent: world.volume },
         is_playing: world.playing,
         progress_ms: world.position,
+        repeat_state: world.repeat,
+        shuffle_state: world.shuffle,
         item: item(world.current),
       },
     }
@@ -120,6 +146,7 @@ function answer(world, method, path, search, body) {
       world.current = idFromUri(uris[0])
       world.position = 0
       world.queue = []
+      world.context = uris.map(idFromUri)
     }
     world.playing = true
     return { status: 204 }
@@ -139,7 +166,19 @@ function answer(world, method, path, search, body) {
       world.current = nextId
       world.position = 0
       world.playing = true
+    } else {
+      afterQueue(world)
     }
+    return { status: 204 }
+  }
+  if (method === 'PUT' && p === '/me/player/repeat') {
+    if (world.refuseModes) return { status: 403, json: { error: { status: 403, message: 'Player command failed: Restriction violated', reason: 'UNKNOWN' } } }
+    world.repeat = search.get('state')
+    return { status: 204 }
+  }
+  if (method === 'PUT' && p === '/me/player/shuffle') {
+    if (world.refuseModes) return { status: 403, json: { error: { status: 403, message: 'Player command failed: Restriction violated', reason: 'UNKNOWN' } } }
+    world.shuffle = search.get('state') === 'true'
     return { status: 204 }
   }
   if (method === 'PUT' && p === '/me/player/volume') {
@@ -508,6 +547,117 @@ export default async function run() {
       check('the walk fast-forwarded over what played', played.length ? step1 >= step0 + played.length : true,
         `#${step0} → #${step1} for ${played.length} tracks`)
       check('nothing was restarted', !world.calls.some((c) => c.includes('[restart]')))
+      await context.close()
+    }
+
+    /* 9 — repeat left on by the user: a station that loops its own seed */
+    if (want(9)) {
+      console.log('\n9 · the player has repeat on when the radio starts')
+      const world = makeWorld(startId)
+      world.repeat = 'context'
+      const { context, page } = await openRadio(browser, world, { startId })
+      await settle(page, world)
+      await sleep(3000)
+      check('repeat was turned off', world.repeat === 'off', `repeat=${world.repeat}`)
+      check('the command was actually sent', world.calls.some((c) => c.includes('player/repeat')))
+      const notice = await ui.notice(page)
+      check('no alarm was raised for something it fixed itself',
+        !/repeat/i.test(notice), notice)
+      await context.close()
+    }
+
+    /* 10 — shuffle left on: the order IS the station */
+    if (want(10)) {
+      console.log('\n10 · the player has shuffle on when the radio starts')
+      const world = makeWorld(startId)
+      world.shuffle = true
+      const { context, page } = await openRadio(browser, world, { startId })
+      await settle(page, world)
+      await sleep(3000)
+      check('shuffle was turned off', world.shuffle === false, `shuffle=${world.shuffle}`)
+      await context.close()
+    }
+
+    /* 11 — a device that refuses: say so, and stop asking */
+    if (want(11)) {
+      console.log('\n11 · the device refuses to change repeat')
+      const world = makeWorld(startId)
+      world.repeat = 'context'
+      world.refuseModes = true
+      const { context, page } = await openRadio(browser, world, { startId })
+      await settle(page, world)
+      await sleep(9000)
+      const tries = world.seen.filter((x) => x.includes('player/repeat')).length
+      check('it gave up instead of arguing every poll', tries > 0 && tries <= 4, `${tries} attempts`)
+      const notice = await ui.notice(page)
+      check('the user is told where to fix it', /repeat/i.test(notice) && /spotify app/i.test(notice), notice)
+      await context.close()
+    }
+
+    /* 12 — the queue ran dry and the player fell back to its context */
+    if (want(12)) {
+      console.log('\n12 · the queue runs out and the player returns to the context')
+      const world = makeWorld(startId)
+      const { context, page } = await openRadio(browser, world, { startId })
+      await settle(page, world)
+      const step0 = await ui.step(page)
+      const first = world.context[0]
+      const behind = world.queue.length
+      // Everything we handed over played while we were not looking, and the
+      // player has nothing left: with repeat off it stops on the context's first
+      // track, which is the first track of the session.
+      world.queue = []
+      world.current = first
+      world.position = 0
+      world.playing = false
+      await sleep(12000)
+
+      const step1 = await ui.step(page)
+      check('the radio noticed and started playing again', world.playing === true,
+        `playing=${world.playing}`)
+      check('it did not sit on the first track', world.current !== first,
+        `current=${world.current} first=${first}`)
+      check('the walk moved on instead of starting over', step1 > step0, `#${step0} → #${step1}`)
+      check('it did not follow the platform back onto an old track',
+        !/followed your player/i.test(await ui.why(page)), await ui.why(page))
+      check('the queue was refilled', world.queue.length >= 1, `${world.queue.length} queued`)
+      console.log(`  recovered to "${(world.current && nodeById.get(world.current) || {}).title}" · ${behind} had been queued`)
+      await context.close()
+    }
+
+    /* 13 — a pause from the Spotify app is sacred */
+    if (want(13)) {
+      console.log('\n13 · the user pauses from the Spotify app, mid-track')
+      const world = makeWorld(startId)
+      const { context, page } = await openRadio(browser, world, { startId })
+      await settle(page, world)
+      // A deliberate pause: it stays where it is, in the middle of the track.
+      world.playing = false
+      world.position = 96000
+      const onAir = world.current
+      await sleep(12000)
+      check('the radio left it paused', world.playing === false, `playing=${world.playing}`)
+      check('and left the track alone', world.current === onAir)
+      check('no play command was sent', !world.calls.some((c) => c.includes('[restart]')),
+        world.calls.filter((c) => c.includes('player/play')).join(', '))
+      await context.close()
+    }
+
+    /* 14 — a pause at the very start of a track is still a pause, not an outage */
+    if (want(14)) {
+      console.log('\n14 · paused at position 0, but the platform still holds our queue')
+      const world = makeWorld(startId)
+      const { context, page } = await openRadio(browser, world, { startId })
+      await settle(page, world)
+      check('the platform is holding something of ours', world.queue.length >= 1,
+        `${world.queue.length} queued`)
+      const onAir = world.current
+      world.playing = false
+      world.position = 0
+      await sleep(12000)
+      check('a full queue means it did not run out', world.playing === false,
+        `playing=${world.playing}`)
+      check('the track was left alone', world.current === onAir)
       await context.close()
     }
 

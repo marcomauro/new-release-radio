@@ -64,6 +64,25 @@ export function createConnectProvider() {
   // for the rest of the session over a lost request.
   const volumeRefused = new Set()
 
+  /* --- repeat and shuffle ------------------------------------------------- */
+
+  // These belong to the user's player, not to us, and they survive between
+  // sessions: whatever was left on while listening to an album is still on when
+  // the radio starts. Both are incompatible with a walk.
+  //
+  // Repeat is the dangerous one. Playback is started ONCE with `play([one uri])`,
+  // so the Spotify context is a single track; with repeat on, the moment the
+  // queue we appended runs out the player returns to that context — which is the
+  // first track of the session. "It stopped and went back to the first track" is
+  // exactly what that looks like from the outside.
+  //
+  // Shuffle is milder and just as wrong: the order IS the station.
+  let modes = { repeat: null, shuffle: null } // as Spotify last reported them
+  // Attempts, so a device that cannot do it is asked a few times and then left
+  // alone rather than argued with every 2.5 seconds.
+  const fixes = { repeat: 0, shuffle: 0 }
+  const MAX_FIXES = 3
+
   const isMobile = () =>
     typeof navigator !== 'undefined' && /iphone|ipad|android/i.test(navigator.userAgent)
 
@@ -150,6 +169,65 @@ export function createConnectProvider() {
 
   const fail = (e) => failed(api.isNetworkError(e) ? 'network' : api.isAuthError(e) ? 'auth' : 'http', handleError(e))
 
+  /**
+   * Put the player's repeat and shuffle back where a radio needs them.
+   *
+   * Called when the station starts and whenever a poll reports them wrong — the
+   * user can change them from the Spotify app mid-session, and on repeat that
+   * silently turns the station into a loop of its own seed.
+   *
+   * A device may refuse (some cannot repeat, some are restricted). That is worth
+   * SAYING rather than retrying: the consequence is audible and the user is the
+   * only one who can fix it, from the Spotify app.
+   */
+  async function enforceModes({ force = false } = {}) {
+    const wrong = []
+    // `null` is "not asked yet" and must not count as wrong — except at the
+    // start, where we set both without waiting to be told.
+    if ((force || (modes.repeat !== null && modes.repeat !== 'off')) && fixes.repeat < MAX_FIXES)
+      wrong.push('repeat')
+    if ((force || modes.shuffle === true) && fixes.shuffle < MAX_FIXES) wrong.push('shuffle')
+    if (!wrong.length) return ok()
+
+    for (const what of wrong) {
+      fixes[what] += 1
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        if (what === 'repeat') await api.repeat('off')
+        // eslint-disable-next-line no-await-in-loop
+        else await api.shuffle(false)
+        modes[what] = what === 'repeat' ? 'off' : false
+        fixes[what] = 0 // it took: a later change gets the same three chances
+      } catch (e) {
+        if (api.isNetworkError(e)) return fail(e) // try again when the link is back
+        if (fixes[what] >= MAX_FIXES) {
+          const note =
+            what === 'repeat'
+              ? 'Spotify has repeat on and this device will not turn it off — the radio will keep returning to the same track. Turn repeat off in the Spotify app.'
+              : 'Spotify has shuffle on and this device will not turn it off — the walk will play out of order. Turn shuffle off in the Spotify app.'
+          say('modes', note)
+          return failed('http', note)
+        }
+      }
+    }
+    return ok()
+  }
+
+  /** What the player says its modes are. Also clears the warning once fixed. */
+  function noteModes(s) {
+    if (!s) return
+    if (typeof s.repeat_state === 'string') modes.repeat = s.repeat_state
+    if (typeof s.shuffle_state === 'boolean') modes.shuffle = s.shuffle_state
+    const good = modes.repeat === 'off' && modes.shuffle !== true
+    if (good) {
+      // Fixed — by us or by the user in the Spotify app. Give a later change its
+      // own attempts, and take the warning down.
+      fixes.repeat = 0
+      fixes.shuffle = 0
+      if (notice.kind === 'modes') notice = { kind: '', text: '' }
+    }
+  }
+
   return {
     id: 'spotify-connect',
     label: 'Spotify Connect',
@@ -190,6 +268,9 @@ export function createConnectProvider() {
       devices = []
       lastRef = null
       notice = { kind: '', text: '' }
+      modes = { repeat: null, shuffle: null }
+      fixes.repeat = 0
+      fixes.shuffle = 0
     },
 
     async resolve(track) {
@@ -221,6 +302,9 @@ export function createConnectProvider() {
         started = true
         lastRef = uri
         clearTransient()
+        // A walk cannot live with repeat or shuffle; set them without waiting to
+        // be told what they are. Failure here is reported, never fatal.
+        await enforceModes({ force: true })
         return ok()
       } catch (e) {
         // A silent device usually just needs the transfer first — but only when
@@ -232,6 +316,7 @@ export function createConnectProvider() {
             started = true
             lastRef = uri
             clearTransient()
+            await enforceModes({ force: true })
             return ok()
           } catch (e2) {
             return fail(e2)
@@ -240,6 +325,12 @@ export function createConnectProvider() {
         return fail(e)
       }
     },
+
+    /**
+     * Put repeat and shuffle back where a radio needs them. The engine calls
+     * this when a poll reports either of them on.
+     */
+    enforceModes,
 
     /** Adopt whatever is already playing: no command sent, just bookkeeping. */
     adopt(ref) {
@@ -385,6 +476,7 @@ export function createConnectProvider() {
         const s = await api.state()
         authError = false
         clearTransient()
+        noteModes(s)
         if (s && s.device) {
           const d = asDevice(s.device)
           if (d) {
@@ -399,6 +491,8 @@ export function createConnectProvider() {
             message: notice.text || (started ? '' : 'ready'),
             volume: device ? device.volume : null,
             volumeAvailable: !!(device && device.supportsVolume),
+            repeat: modes.repeat,
+            shuffle: modes.shuffle,
           })
         }
         const imgs = (s.item.album && s.item.album.images) || []
@@ -412,6 +506,8 @@ export function createConnectProvider() {
           message: notice.text,
           volume: device ? device.volume : null,
           volumeAvailable: !!(device && device.supportsVolume),
+          repeat: modes.repeat,
+          shuffle: modes.shuffle,
         })
       } catch (e) {
         if (api.isNetworkError(e)) {

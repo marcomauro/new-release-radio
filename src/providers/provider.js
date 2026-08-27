@@ -28,6 +28,13 @@
                                    itself says it will play next, in order, or
                                    null when it cannot say. The authority the
                                    engine reconciles its own record against
+     enforceModes()              → optional: put the platform's own repeat and
+                                   shuffle back where a walk needs them. A
+                                   platform that reports `repeat`/`shuffle` in
+                                   its Snapshot should implement this — they
+                                   belong to the USER's player, survive between
+                                   sessions, and repeat quietly turns a station
+                                   into a loop of its own first track
      pause() / resume() / seek(ms)
      setVolume(0..100)           → CAPS.VOLUME. Returns a Result: a platform
                                    that refuses (a phone sets its own volume)
@@ -42,7 +49,7 @@
 
    Snapshot (everything optional except `playing`):
      { playing, position, duration, ref, endedRef, artwork, message, authError,
-       stale, volume, volumeAvailable }
+       stale, volume, volumeAvailable, repeat, shuffle }
 
    Result, the answer to every command:
      { ok, kind, message }   kind: '' | 'network' | 'http' | 'auth'
@@ -88,6 +95,8 @@ export function makeSnapshot(partial = {}) {
     stale: false,
     volume: null,
     volumeAvailable: false,
+    repeat: null,
+    shuffle: null,
     ...partial,
   }
 }
