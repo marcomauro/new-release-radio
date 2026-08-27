@@ -120,6 +120,18 @@ Two consequences worth stating on their own:
   measured in minutes of music, and the horizon counts the queue only — what is
   playing right now buys nothing, because when it ends we may be no more able to
   act than we are now.
+- **And when it runs dry anyway, that is a state to recognise, not to follow.**
+  Playback is started once with `play([one uri])`, so the Spotify context is a
+  single track: a player that exhausts the queue falls back to that context and
+  lands on the **first track of the session**. Following it would re-anchor the
+  walk there and the station would silently start over. Stopped at position ~0
+  with nothing of ours left on the platform is read as "the stream ran out": the
+  walk advances past everything that played while we were blind and starts the
+  next track. A stop anywhere else in a track is a pause, and pause is sacred.
+- **Repeat and shuffle are the user's, and both are fatal to a walk.** They live
+  on the account and survive between sessions, so the radio sets them off when a
+  station starts, watches them on every poll, and after three refusals says which
+  one is stuck and where to fix it.
 - **The connection is not an error.** A dropped request is a normal condition for
   a radio on a train. It shows as a state of the device pill, not as an amber
   banner, and it says so in words only when the user reaches for a control that

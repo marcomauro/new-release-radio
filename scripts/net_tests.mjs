@@ -594,29 +594,70 @@ export default async function run() {
       await context.close()
     }
 
-    /* 12 — PROBE: the queue ran dry and the player fell back to its context */
+    /* 12 — the queue ran dry and the player fell back to its context */
     if (want(12)) {
       console.log('\n12 · the queue runs out and the player returns to the context')
       const world = makeWorld(startId)
       const { context, page } = await openRadio(browser, world, { startId })
       await settle(page, world)
       const step0 = await ui.step(page)
-      const title0 = await ui.title(page)
-      console.log(`  before: #${step0} "${title0}" · queue ${world.queue.length} · context ${world.context.length}`)
+      const first = world.context[0]
+      const behind = world.queue.length
       // Everything we handed over played while we were not looking, and the
       // player has nothing left: with repeat off it stops on the context's first
-      // track — the first track of the session.
+      // track, which is the first track of the session.
       world.queue = []
-      world.current = world.context[0]
+      world.current = first
       world.position = 0
       world.playing = false
-      await sleep(9000)
+      await sleep(12000)
+
       const step1 = await ui.step(page)
-      const title1 = await ui.title(page)
-      const why = await ui.why(page)
-      console.log(`  after:  #${step1} "${title1}" · why "${why}"`)
-      console.log(`  playing again: ${world.playing} · queue ${world.queue.length}`)
-      console.log(`  commands sent: ${world.calls.filter((c) => c.startsWith('PUT') || c.startsWith('POST')).join(', ') || 'none'}`)
+      check('the radio noticed and started playing again', world.playing === true,
+        `playing=${world.playing}`)
+      check('it did not sit on the first track', world.current !== first,
+        `current=${world.current} first=${first}`)
+      check('the walk moved on instead of starting over', step1 > step0, `#${step0} → #${step1}`)
+      check('it did not follow the platform back onto an old track',
+        !/followed your player/i.test(await ui.why(page)), await ui.why(page))
+      check('the queue was refilled', world.queue.length >= 1, `${world.queue.length} queued`)
+      console.log(`  recovered to "${(world.current && nodeById.get(world.current) || {}).title}" · ${behind} had been queued`)
+      await context.close()
+    }
+
+    /* 13 — a pause from the Spotify app is sacred */
+    if (want(13)) {
+      console.log('\n13 · the user pauses from the Spotify app, mid-track')
+      const world = makeWorld(startId)
+      const { context, page } = await openRadio(browser, world, { startId })
+      await settle(page, world)
+      // A deliberate pause: it stays where it is, in the middle of the track.
+      world.playing = false
+      world.position = 96000
+      const onAir = world.current
+      await sleep(12000)
+      check('the radio left it paused', world.playing === false, `playing=${world.playing}`)
+      check('and left the track alone', world.current === onAir)
+      check('no play command was sent', !world.calls.some((c) => c.includes('[restart]')),
+        world.calls.filter((c) => c.includes('player/play')).join(', '))
+      await context.close()
+    }
+
+    /* 14 — a pause at the very start of a track is still a pause, not an outage */
+    if (want(14)) {
+      console.log('\n14 · paused at position 0, but the platform still holds our queue')
+      const world = makeWorld(startId)
+      const { context, page } = await openRadio(browser, world, { startId })
+      await settle(page, world)
+      check('the platform is holding something of ours', world.queue.length >= 1,
+        `${world.queue.length} queued`)
+      const onAir = world.current
+      world.playing = false
+      world.position = 0
+      await sleep(12000)
+      check('a full queue means it did not run out', world.playing === false,
+        `playing=${world.playing}`)
+      check('the track was left alone', world.current === onAir)
       await context.close()
     }
 

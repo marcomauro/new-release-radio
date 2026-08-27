@@ -45,6 +45,17 @@
       Playback commands never are: a duplicate `next` is audible, and a lost
       answer cannot be told from a lost request.
 
+   **A stream that ran out.** The queue can still empty — a phone hidden longer
+   than the horizon, an outage longer than the music we had handed over. When it
+   does, the platform stops, and because the station starts a ONE-TRACK context a
+   player that falls back to its context lands on the first track of the session.
+   The radio used to notice none of this: `wantsPlay` was true, the poll said
+   `playing: false`, and no rule acted on it — so the music stopped and stayed
+   stopped, on the first track. It now recognises the case (stopped at position
+   ~0 with nothing of ours left on the platform), advances the walk past
+   everything that played while it was blind, and starts the next track. A pause
+   anywhere else in a track is somebody pressing pause, and pause is sacred.
+
    The hook owns no music logic. Rules live in core/rules.js.
    -------------------------------------------------------------------------- */
 
@@ -97,6 +108,13 @@ const WATCHDOG_MS = 18000
 // Our record of the platform's queue is re-checked against the platform this
 // often — and always right after the network comes back.
 const QUEUE_AUDIT_MS = 20000
+
+// After recovering an exhausted stream, wait this long before doing it again.
+// A restart that does not take must not become a loop of restarts.
+const RECOVERY_COOLDOWN_MS = 15000
+// A stop at the very beginning of a track is the platform running out; a stop
+// anywhere else is somebody pressing pause.
+const RAN_OUT_POSITION_MS = 2000
 
 const OUTBOX_MAX = 8
 const VOLUME_DEBOUNCE_MS = 220
@@ -177,6 +195,9 @@ export function useRadio() {
   const busyRef = useRef(false)
   const busySince = useRef(0)
   const lastAuditAt = useRef(0)
+  const pausedByUs = useRef(false) // we asked for the pause, so do not undo it
+  const hasPlayed = useRef(false) // the platform has actually played at least once
+  const lastRecoveryAt = useRef(0)
   const adoptedRef = useRef(false) // did we already look for a running session?
   const justLoggedInRef = useRef(false)
   const loginErrorRef = useRef('')
@@ -475,6 +496,7 @@ export function useRadio() {
 
   const startCurrent = useCallback(async () => {
     if (!provider || !station || !station.current) return
+    pausedByUs.current = false
     const ref = await provider.resolve(station.current)
     expectedRef.current = ref
     // `play(uri)` replaces the platform's context: whatever we had queued is gone.
@@ -498,6 +520,12 @@ export function useRadio() {
       const i = queuedRefs.current.indexOf(ref)
       queuedRefs.current = i >= 0 ? queuedRefs.current.slice(i + 1) : []
       handedOver.current.delete(ref)
+      // A track boundary is the moment our record of the platform's queue is
+      // most likely to be fiction, and the cheapest moment to check it: one
+      // request per track instead of one per poll. On a 20-second timer alone
+      // the record could claim to hold a track the platform had already lost —
+      // and since it never LOOKED short, no top-up was sent either.
+      lastAuditAt.current = 0
       // Keep the record of what we gave the platform from growing for ever.
       if (handedOver.current.size > 64) handedOver.current = new Set(queuedRefs.current)
       setCover(null)
@@ -636,8 +664,47 @@ export function useRadio() {
           await topUpQueue() // first thing after an outage: refill the platform
         }
 
+        if (snap.playing) {
+          hasPlayed.current = true
+          pausedByUs.current = false // it is playing, whoever asked for it
+        }
+
         if (canQueue) {
           const ref = snap.ref
+
+          // **The stream ran out.** Everything we handed over has played and the
+          // platform has nothing left, so it stopped — and because the station
+          // starts a ONE-TRACK context, a player that falls back to its context
+          // lands on the first track of the session. That is what "it stopped
+          // and went back to the first track" looks like from the outside.
+          //
+          // This has to be decided BEFORE the ref-change branch below, or the
+          // walk follows the platform onto that old track and re-anchors there:
+          // the station would silently start over.
+          //
+          // A stop at position ~0 with an empty platform queue is running out; a
+          // stop anywhere else is somebody pressing pause, and pause is sacred.
+          if (
+            !snap.playing &&
+            hasPlayed.current &&
+            !pausedByUs.current &&
+            (snap.position || 0) < RAN_OUT_POSITION_MS &&
+            Date.now() - lastRecoveryAt.current > RECOVERY_COOLDOWN_MS &&
+            provider.queuedRefs
+          ) {
+            const behind = queuedRefs.current.length
+            const asked = await reconcileQueue()
+            if (asked && queuedRefs.current.length === 0) {
+              // Those `behind` tracks played while we were not watching, plus the
+              // one that just finished: the walk is that far back.
+              for (let i = 0; i <= behind; i++) station.advance()
+              lastRecoveryAt.current = Date.now()
+              flash('the stream ran out — picking the walk back up')
+              await startCurrent()
+              return
+            }
+          }
+
           if (ref && ref !== expectedRef.current) {
             // Which of our decided tracks is this? Coming back from a locked
             // screen or an outage it can be several steps ahead, so look along
@@ -787,6 +854,7 @@ export function useRadio() {
       flash('no answer from Spotify yet — the radio will pick up as soon as the network is back')
       return
     }
+    pausedByUs.current = false
     const onAir = !!(snap && snap.ref && snap.ref === expectedRef.current)
     if (onAir && snap.playing) return // already playing: nothing to restart
     if (onAir) await provider.resume()
@@ -794,6 +862,7 @@ export function useRadio() {
   }, [provider, station, startCurrent, flash])
 
   const pause = useCallback(async () => {
+    pausedByUs.current = true
     if (provider) await provider.pause()
     const next = { ...snapRef.current, playing: false }
     snapRef.current = next
