@@ -178,6 +178,60 @@ What remains true, and what a real fix would need:
   explicit user action or a confirmed stall. Two instances then both append and
   the music never stops.
 
+### A buffer instead of a queue — the open decision
+
+**Status: proposed, not built.** The current build (queue + repeat/shuffle
+enforcement + ran-out recovery) is being lived with first; this is written down
+so the reasoning survives the decision being postponed.
+
+The queue is not the problem in itself — the **one-track context** is. Everything
+above traces back to it, and a playlist used as the context removes the cause
+rather than the symptoms.
+
+**It is not "how long", it is "how far ahead".** A playlist can be appended to
+while it is the playing context, so there is no length to choose: the same
+horizon in minutes that `targetDepth` already computes, on a container the player
+walks through by itself. The difference is what happens at the end of it — a
+queue that empties hits a cliff (the context is one track), a playlist that is
+still ahead of the cursor just keeps playing, and Spotify's autoplay never gets a
+turn.
+
+**The numbers.** The median archive track is 3:49. `POST /playlists/{id}/tracks`
+takes **100 URIs per call**, and a playlist holds 10,000 tracks.
+
+| buffer | tracks | requests |
+| --- | --- | --- |
+| 90 minutes | ~24 | 1 |
+| 8 hours | ~126 | 2 |
+
+So depth is nearly free. The real cost is not requests or capacity, it is **how
+far ahead the walk is committed**: anything already in the playlist plays even if
+the rules change or the listener skips. That is why the queue depth is 1 while
+the app is on screen today.
+
+But the commitment is **revocable**: the tail after the cursor can be removed and
+rewritten in one request. So depth costs a rewrite when the rules change, not
+responsiveness. A working shape would be ~3 tracks on screen, ~2 hours hidden or
+on a bad link, tail rewritten on a rule change or a skip.
+
+**The honest guarantee.** There is no "continuous forever" — there is a number
+you choose. Three hours in a pocket with no network and a 90-minute buffer means
+silence at 90 minutes; today's queue means silence at ten. Any single successful
+request refills it. Truly unbounded would mean writing the whole walk in advance,
+which is a playlist and no longer a walk that reacts.
+
+**What it costs.** The project's "no playlist objects, ever" rule, a
+`playlist-modify-private` scope (one new consent screen), and one private
+playlist living in the user's account — reused, not one per session.
+
+**Verify this first.** The design rests on a platform behaviour that has not been
+tested: that tracks appended to a playlist *while it is the playing context* are
+picked up without interrupting playback. It is very likely true, but this project
+has twice been bitten by assuming platform behaviour — the iFrame API replacing
+its host element, and autoplay appearing in `/me/player/queue`. Ten minutes with
+a real account settles it: a playlist, two tracks, add a third during the second,
+and watch whether it plays.
+
 ## Verification
 
 Anything the sandbox cannot reach gets a stub, because a comment is not evidence.

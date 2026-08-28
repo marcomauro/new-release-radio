@@ -145,10 +145,12 @@ audio but is **caged** and inert — an engine, not a second player.
 - **The queue is deeper when the app is not on screen.** A mobile browser freezes
   timers the moment you lock the screen, so a radio holding a single track in
   Spotify's queue runs dry within minutes and Spotify's own autoplay takes the
-  session over — you are no longer listening to the walk. Hidden, the radio keeps
-  **three** tracks queued (~15 minutes); visible, **one**, so the rules panel
-  stays responsive. Coming back, the walk **fast-forwards** over whatever played
-  while it was asleep instead of losing those steps.
+  session over — you are no longer listening to the walk. Hidden, the radio queues
+  enough tracks to cover **ten minutes of music** (counted in minutes, not in
+  tracks: a two-minute track buys half of what a five-minute one does); visible,
+  **one**, so the rules panel stays responsive. Coming back, the walk
+  **fast-forwards** over whatever played while it was asleep instead of losing
+  those steps.
 - **Connect comes first.** Before the first play on a touch device the cover
   offers `connect Spotify`, with previews underneath, named for what they are:
   30-second clips, no volume, and on iOS a cross-origin iframe that wants the tap
@@ -318,6 +320,16 @@ new-release-radio/
   honest.
 - **Sharing a station.** A walk is reproducible from `(seed, preset, archive)`,
   so a station is a URL: `?seed=<track-id>&preset=drift`.
+- **A rolling playlist instead of the queue — decided when the current build has
+  been lived with.** Playback is started with `play([one uri])`, so the Spotify
+  context is a *single track*. That one fact is the root of the whole family of
+  playback bugs this app has had: the return to the first track when the queue
+  empties, the stall that followed it, and Spotify's autoplay leaking into the
+  queue we read. One private playlist, used as the context and appended to as the
+  walk decides, removes all three — it is what New Release Atlas did, and why its
+  streaming never stopped. See `docs/ARCHITECTURE.md`, "Two radios, one account"
+  and "A buffer instead of a queue", for the sizing, the trade-offs, and the one
+  platform behaviour that must be verified before building on it.
 
 ---
 
