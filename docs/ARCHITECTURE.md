@@ -211,6 +211,13 @@ unlikely.
 Both need a Chromium and are development tools — the deploy workflow does not run
 them.
 
+**Which build am I looking at?** The panel ends with the commit and the time it
+was built, stamped in by `vite.config.js`. An installed PWA keeps serving the
+version it already has until the service worker takes over on a real relaunch, so
+"it is fixed" and "I can see the fix" are different claims — twice a deployed
+change was reported as missing when it was only the cached build. The stamp turns
+that into something you look at rather than argue about.
+
 ## Failure, by design
 
 The radio should degrade, never break:

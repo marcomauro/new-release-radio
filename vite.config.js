@@ -1,6 +1,26 @@
+import { execSync } from 'node:child_process'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+
+/* Which build am I looking at?
+   An installed PWA keeps serving the version it has until the service worker
+   takes over on a real relaunch, so "it is fixed" and "I can see the fix" are
+   different claims — twice now a deployed change was reported as missing when it
+   was simply the cached build. The commit and the time it was built are stamped
+   in at build time and shown in the panel, so the question is answerable at a
+   glance instead of by argument. */
+const commit = (() => {
+  try {
+    return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim()
+  } catch (e) {
+    // No git in the build environment: the workflow still knows the SHA.
+    return (process.env.GITHUB_SHA || 'dev').slice(0, 7)
+  }
+})()
+const builtAt = new Date().toISOString()
 
 // GitHub Pages serves project sites from /<repo-name>/. `base` MUST match the
 // repository name exactly, or the assets 404 in production and the page stays
@@ -10,6 +30,10 @@ const base = '/new-release-radio/'
 
 export default defineConfig({
   base,
+  define: {
+    __BUILD_COMMIT__: JSON.stringify(commit),
+    __BUILD_TIME__: JSON.stringify(builtAt),
+  },
   plugins: [
     react(),
     VitePWA({
