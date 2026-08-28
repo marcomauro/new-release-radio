@@ -18,7 +18,9 @@
        hover (on a desktop the flip was invisible until the mouse swept over it);
      • the panel's search field lines up with the headings above it, inside the
        column — its own `padding` shorthand used to wipe the gutter and run the
-       field to the window edge.
+       field to the window edge;
+     • the panel stamps the commit and build time, so "am I looking at the
+       latest build?" is answered by looking.
 
      node scripts/fit_tests.mjs                 # every size
      node scripts/fit_tests.mjs --shots <dir>   # also save screenshots
@@ -215,6 +217,15 @@ for (const size of SIZES) {
   check(`${size.name}: search field lines up with the headings`,
     Math.abs(box.input.x - box.heading.x) <= 1, `input ${box.input.x} vs heading ${box.heading.x}`)
   check(`${size.name}: search field inside the window`, box.input.right <= box.vw + 0.5)
+
+  // The build stamp: which version am I actually looking at? An installed app
+  // serves the version it has until the service worker takes over, and twice a
+  // deployed fix was reported as missing when it was only the cached build.
+  const stamp = (await page.locator('.info.build').count())
+    ? (await page.locator('.info.build').innerText()).replace(/\n/g, ' ')
+    : ''
+  check(`${size.name}: the panel stamps the build`,
+    /^build\s+[0-9a-f]{7}\s+·\s+\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC$/.test(stamp.trim()), stamp)
   if (OUT && size.name.startsWith('desktop window (rep')) {
     await page.screenshot({ path: `${OUT}/fit-panel.png` })
   }

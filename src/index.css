@@ -1132,6 +1132,27 @@ input {
   height: 18px;
 }
 
+/* The build stamp: the quietest line in the app, and the first one to look at
+   when a fix seems to be missing. */
+.info.build {
+  margin-top: 28px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+
+.info.build a {
+  color: var(--dim);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.info.build a:hover {
+  color: var(--muted);
+}
+
 .search {
   /* Block, or the auto margins from `.panel > *` compute to zero and the field
      sits at the left of the window while every heading around it is centred in

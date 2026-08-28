@@ -26,6 +26,20 @@ function Slider({ name, desc, value, min, max, step, onChange, format }) {
   )
 }
 
+/* Stamped in by vite.config.js at build time. `__BUILD_*__` are replaced
+   literally, so the guards are for anything that imports this outside Vite. */
+const BUILD = {
+  commit: typeof __BUILD_COMMIT__ === 'string' ? __BUILD_COMMIT__ : 'dev',
+  built: (() => {
+    const iso = typeof __BUILD_TIME__ === 'string' ? __BUILD_TIME__ : ''
+    if (!iso) return 'not stamped'
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return iso
+    // UTC on purpose: it is compared against a deploy log, not read as a clock.
+    return `${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 16)} UTC`
+  })(),
+}
+
 export default function Panel({ radio, onClose }) {
   const [tab, setTab] = useState('station')
   const [q, setQ] = useState('')
@@ -318,6 +332,22 @@ export default function Panel({ radio, onClose }) {
           </p>
         </>
       )}
+
+      {/* Every tab ends here. An installed app serves the version it already
+          has until the service worker takes over on a real relaunch, so this is
+          how "am I looking at the latest build?" gets answered by looking
+          instead of by arguing. */}
+      <p className="info build">
+        build{' '}
+        <a
+          href={`https://github.com/marcomauro/new-release-radio/commit/${BUILD.commit}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          {BUILD.commit}
+        </a>{' '}
+        · {BUILD.built}
+      </p>
     </div>
   )
 }
