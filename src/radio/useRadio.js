@@ -56,12 +56,17 @@
    everything that played while it was blind, and starts the next track. A pause
    anywhere else in a track is somebody pressing pause, and pause is sacred.
 
-   **Two radios, one account.** A phone and a desktop can both be running this
-   app against the same Spotify account, and there is no lock to take: the two
-   devices share nothing but Spotify. So another instance is DETECTED — from a
-   platform queue holding archive tracks we never handed over — and the radio
-   stands down and asks who should steer, rather than fighting it or silently
-   stopping being the thing you hear.
+   **Two radios, one account — and why there is no detection of it here.** A
+   phone and a desktop can both run this app against one Spotify account, and
+   then both are steering. There is no lock to take: the two devices share
+   nothing but Spotify. An attempt was made to DETECT the other instance, from a
+   platform queue holding archive tracks we never handed over, and it had to be
+   removed — see docs/ARCHITECTURE.md, "Two radios, one account". The short
+   version: `GET /me/player/queue` also returns what the player will pull from
+   the context, which once our one-track context is spent is Spotify's own
+   autoplay — and the archive is a dense cluster of mutually similar new
+   releases, exactly what "more like this" serves. The signal was not specific,
+   and the API has no field saying who queued a track.
 
    The hook owns no music logic. Rules live in core/rules.js.
    -------------------------------------------------------------------------- */
@@ -187,10 +192,6 @@ export function useRadio() {
   const [link, setLinkState] = useState('online')
   // Bumped to try the session adopt again when the first attempt got no answer.
   const [adoptAttempt, setAdoptAttempt] = useState(0)
-  // Another instance of this radio appears to be driving the same account.
-  // `driving` is us: while it is false we send NOTHING and only follow along.
-  const [contended, setContended] = useState(false)
-  const [driving, setDriving] = useState(true)
 
   const providersRef = useRef(null)
   const stationRef = useRef(null)
@@ -209,10 +210,6 @@ export function useRadio() {
   const pausedByUs = useRef(false) // we asked for the pause, so do not undo it
   const hasPlayed = useRef(false) // the platform has actually played at least once
   const lastRecoveryAt = useRef(0)
-  const drivingRef = useRef(true) // read inside the loop, which does not re-close
-  // After taking over, give the other instance time to notice and stand down
-  // before accusing it again — otherwise the two of them ping-pong the question.
-  const contendQuietUntil = useRef(0)
   const adoptedRef = useRef(false) // did we already look for a running session?
   const justLoggedInRef = useRef(false)
   const loginErrorRef = useRef('')
@@ -466,49 +463,13 @@ export function useRadio() {
    */
   const reconcileQueue = useCallback(async () => {
     if (!provider || !provider.queuedRefs) return false
-    // Standing down: no record to keep, and no accusations to make.
-    if (!drivingRef.current) return false
     const reported = await provider.queuedRefs()
     lastAuditAt.current = Date.now()
     if (!reported) return false // could not ask; keep what we had
     const mine = handedOver.current
-
-    /* --- is somebody else driving this account? ---------------------------
-       There is no lock to take: the phone and the desktop share nothing but
-       Spotify itself. But another New Release Radio leaves a signature nothing
-       else does — a queue full of ARCHIVE tracks that we never handed over.
-       Spotify's own autoplay suggests from the whole catalogue, of which our 873
-       tracks are a rounding error; a person pressing next queues nothing at all.
-
-       Two signals, because one is not enough to accuse:
-         • foreign archive tracks sitting in the queue, and
-         • tracks WE handed over that have vanished without playing — the
-           signature of somebody else calling `play()`, which replaces the
-           context and wipes the queue.
-       Two or more foreign tracks is conclusive on its own (another radio queues
-       that deep the moment its screen goes off). One is enough when ours
-       disappeared at the same time. */
-    const isOurs = (r) => {
-      const id = provider.trackIdFromRef ? provider.trackIdFromRef(r) : null
-      return !!(id && archive && archive.index.node(id))
-    }
-    const foreign = reported.filter((r) => !mine.has(r) && isOurs(r))
-    const vanished = queuedRefs.current.filter((r) => !reported.includes(r))
-    if (
-      Date.now() > contendQuietUntil.current &&
-      (foreign.length >= 2 || (foreign.length >= 1 && vanished.length > 0))
-    ) {
-      // Stand down first, ask second: two radios fighting over one account is
-      // worse than one radio waiting. Nothing is sent from here on until the
-      // user says who is in charge.
-      drivingRef.current = false
-      setDriving(false)
-      setContended(true)
-    }
-
     queuedRefs.current = reported.filter((r) => mine.has(r))
     return true
-  }, [provider, archive])
+  }, [provider])
 
   /**
    * Keep the platform's queue filled to the current depth. Each track is handed
@@ -517,7 +478,6 @@ export function useRadio() {
    */
   const topUpQueue = useCallback(async () => {
     if (!canQueue || !provider || !station) return
-    if (!drivingRef.current) return // another instance is driving: send nothing
     const depth = targetDepth()
     // Our record can be wrong in both directions after an outage. Re-check it
     // against the platform — but only when the link is worth spending on.
@@ -549,11 +509,6 @@ export function useRadio() {
   const startCurrent = useCallback(async () => {
     if (!provider || !station || !station.current) return
     pausedByUs.current = false
-    // Anything that starts playback is a decision, and a decision settles the
-    // question of who is driving.
-    drivingRef.current = true
-    setDriving(true)
-    setContended(false)
     const ref = await provider.resolve(station.current)
     expectedRef.current = ref
     // `play(uri)` replaces the platform's context: whatever we had queued is gone.
@@ -743,7 +698,6 @@ export function useRadio() {
           // stop anywhere else is somebody pressing pause, and pause is sacred.
           if (
             !snap.playing &&
-            drivingRef.current &&
             hasPlayed.current &&
             !pausedByUs.current &&
             (snap.position || 0) < RAN_OUT_POSITION_MS &&
@@ -1063,27 +1017,6 @@ export function useRadio() {
     [provider, refreshOutputs, remember, flash]
   )
 
-  /** "This one is mine": resume driving, and refill what the other one left. */
-  const takeOver = useCallback(async () => {
-    drivingRef.current = true
-    setDriving(true)
-    setContended(false)
-    contendQuietUntil.current = Date.now() + 60000
-    handedOver.current = new Set()
-    queuedRefs.current = []
-    lastAuditAt.current = 0
-    await topUpQueue()
-    flash('this radio is driving now — the other one will notice and stand down')
-  }, [topUpQueue, flash])
-
-  /** "Let the other one play": stay on screen, send nothing, stop asking. */
-  const standDown = useCallback(() => {
-    drivingRef.current = false
-    setDriving(false)
-    setContended(false)
-    flash('just listening — this radio will follow along without steering')
-  }, [flash])
-
   const switchProvider = useCallback(
     (id) => {
       if (!id || id === providerId) return
@@ -1175,14 +1108,6 @@ export function useRadio() {
     playing: snapshot.playing,
     progress: { position: snapshot.position || 0, duration: snapshot.duration || 0 },
     started: wantsPlay,
-
-    // Another instance of the radio is driving this same Spotify account. There
-    // is no lock to take — the two devices share nothing but Spotify — so this
-    // is detected, not enforced, and the user decides.
-    contended,
-    driving,
-    takeOver,
-    standDown,
 
     // what we currently believe about the connection: 'online' | 'degraded' |
     // 'offline'. The UI shows it as a state of the device pill, not as an

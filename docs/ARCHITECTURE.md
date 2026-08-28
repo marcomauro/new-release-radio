@@ -133,33 +133,50 @@ Two consequences worth stating on their own:
   station starts, watches them on every poll, and after three refusals says which
   one is stuck and where to fix it.
 
-### Two radios, one account
+### Two radios, one account — and a detection that had to be removed
 
-A phone and a desktop can both be running this app against the same Spotify
-account, and then both are steering: each sees a track it did not choose, calls
-`play()`, and wipes the other's queue. There is **no lock to take** — the two
-devices share nothing but Spotify itself, `localStorage` is per-device, and this
-app has no server by design. A shared lease would mean a backend.
+A phone and a desktop can both run this app against one Spotify account, and then
+both are steering: each sees a track it did not choose, calls `play()`, and wipes
+the other's queue. There is **no lock to take** — the two devices share nothing
+but Spotify itself, `localStorage` is per-device, and this app has no server by
+design.
 
-So it is **detected, not enforced**, and the user decides:
+A detection was built and then removed, and the reason is worth keeping, because
+the idea is tempting enough to have a second time.
 
-- the signature is a platform queue holding **archive tracks we never handed
-  over**. Spotify's own autoplay suggests from the whole catalogue, of which the
-  archive is a rounding error; a person pressing next queues nothing at all. Two
-  foreign archive tracks is conclusive on its own; one is enough when tracks we
-  handed over vanished at the same time, which is what `play()` from elsewhere
-  looks like;
-- on detection the radio **stands down first and asks second** — two radios
-  fighting over one account is worse than one radio waiting — and offers *steer
-  from here* or *just listen*. While standing down it sends nothing and only
-  follows, so the screen stays truthful;
-- the accusation is deliberately hard to trigger and easy to answer. A false
-  positive costs one line the user dismisses; guessing would either fight the
-  other instance or silently stop being the thing they are hearing.
-- **The connection is not an error.** A dropped request is a normal condition for
-  a radio on a train. It shows as a state of the device pill, not as an amber
-  banner, and it says so in words only when the user reaches for a control that
-  cannot work yet.
+The signal was *an archive track in the platform's queue that we never handed
+over*, on the argument that Spotify's own autoplay suggests from the whole
+catalogue, of which 873 tracks are a rounding error. **That argument is wrong.**
+The archive is not a random sample of the catalogue: it is a dense cluster of
+mutually similar new releases, which is exactly what "more like this" serves. And
+`GET /me/player/queue` returns the user queue *plus* what the player will pull
+from the context — which, once our one-track context is spent, is autoplay. So
+the queue fills with archive tracks nobody queued, on a single instance, and the
+accusation fires continuously. Reproduced in the stub with one radio running:
+two archive suggestions were enough.
+
+The API has no field saying who queued a track, so the signal cannot be made
+specific. It was not a threshold to tune; it was the wrong evidence.
+
+Worse, the accusation was not free: standing down meant no top-ups, so a false
+positive **caused** the dry queue it was meant to prevent, and playback stopped
+until the user pressed "steer from here".
+
+What remains true, and what a real fix would need:
+
+- the root of this whole family of problems is that playback is started with
+  `play([one uri])`, so the Spotify context is a **single track**. That is what
+  makes the queue the only continuity we have, what sends the player back to the
+  first track when the queue empties, and what lets autoplay into the queue at
+  all;
+- the alternative is to give Spotify a context it can play through — one rolling
+  playlist, appended to as the walk decides. It costs the project's "no playlist
+  objects, ever" rule and a `playlist-modify-private` scope, and it is how New
+  Release Atlas simply kept playing;
+- short of that, the honest position is to make the *effects* harmless rather
+  than to identify the cause: never `play()` after the start except on an
+  explicit user action or a confirmed stall. Two instances then both append and
+  the music never stops.
 
 ## Verification
 

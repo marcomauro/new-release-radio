@@ -972,34 +972,6 @@ input {
   min-height: 14px;
 }
 
-/* Two radios on one account. This takes the notice's place rather than sitting
-   beside it: it is the only line on screen that asks the user for a decision, so
-   nothing else should be competing with it. */
-.contend {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 6px 12px;
-  font-size: 11px;
-  line-height: 1.4;
-  color: #d9a05b;
-  text-align: center;
-  padding: 0 18px 6px;
-}
-
-.contend .acts {
-  display: inline-flex;
-  gap: 8px;
-  flex: 0 0 auto;
-}
-
-@media (max-width: 480px) {
-  .contend {
-    padding: 0 12px 8px;
-  }
-}
-
 /* The Spotify preview engine, caged.
 
    The Spotify iFrame API REPLACES the element it is handed with its own
