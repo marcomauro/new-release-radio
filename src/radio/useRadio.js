@@ -93,13 +93,24 @@ const OFFLINE_AFTER = 3
 
 // How many decided tracks may sit in the platform's own queue.
 //
-// One when everything is fine and the app is on screen: the rules panel stays
-// responsive — change a rule and it applies to the very next track.
-// More when we cannot count on being asked again soon (hidden, or a network
-// that is dropping requests), sized by TIME rather than by count: what matters
-// is that the stream does not run out and hand the session to Spotify's
+// THREE, not one, even with the app on screen — because of skip. `next` plays
+// whatever the platform holds, and with a single track queued the first skip
+// empties the queue: a second skip a moment later finds nothing there and the
+// player falls back to its context, which is the FIRST track of the session.
+// Three means three skips in a row still land on the walk.
+//
+// It is a real trade: Spotify has no way to REMOVE a track from the queue (the
+// API only appends), so everything queued is committed. Depth is therefore lag
+// — a rule change now applies three tracks later instead of one. That is the
+// price of a skip button that works, and the reason a rolling playlist (whose
+// tail CAN be rewritten) is the better shape long-term; see
+// docs/ARCHITECTURE.md, "A buffer instead of a queue".
+//
+// Deeper still when we cannot count on being asked again soon (hidden, or a
+// network that is dropping requests), sized by TIME rather than by count: what
+// matters is that the stream does not run out and hand the session to Spotify's
 // autoplay, and a two-minute track buys half of what a five-minute one does.
-const QUEUE_DEPTH = { visible: 1, max: 6 }
+const QUEUE_DEPTH = { visible: 3, max: 6 }
 const HORIZON_MS = { hidden: 10 * 60 * 1000, degraded: 8 * 60 * 1000 }
 const FALLBACK_TRACK_MS = 210 * 1000
 
@@ -120,6 +131,10 @@ const WATCHDOG_MS = 18000
 // Our record of the platform's queue is re-checked against the platform this
 // often — and always right after the network comes back.
 const QUEUE_AUDIT_MS = 20000
+// A skip pays for its own audit unless one just ran: the answer decides between
+// the platform's `next` and a `play` of our own, and getting it wrong sends the
+// player back to the one track its context holds.
+const SKIP_AUDIT_MS = 1500
 
 // After recovering an exhausted stream, wait this long before doing it again.
 // A restart that does not take must not become a loop of restarts.
@@ -888,14 +903,44 @@ export function useRadio() {
   }, [pause, play])
 
   /** Next track. On a queue platform the queued track is already there. */
+  /**
+   * Next track. On a queue platform the track is already on the device, so the
+   * skip is the platform's own `next` — but only while we know the platform is
+   * actually holding something of ours. `next` on an exhausted queue falls back
+   * to the context, and the context is one track: the first of the session.
+   */
   const next = useCallback(async () => {
     if (!provider || !station) return
     setWantsPlay(true)
-    if (canQueue && provider.skip) {
+    // Our record of the queue is only as fresh as the last audit, and between
+    // audits the platform can have emptied it under us — another session's
+    // play, a device that dropped the queue. One read is cheap next to what a
+    // wrong answer costs here, so ask before skipping, whenever the link is
+    // worth spending on and the record is not already a moment old.
+    if (
+      canQueue &&
+      provider.skip &&
+      linkRef.current === 'online' &&
+      Date.now() - lastAuditAt.current > SKIP_AUDIT_MS
+    ) {
+      await reconcileQueue()
+    }
+    if (canQueue && provider.skip && queuedRefs.current.length > 0) {
       const r = await provider.skip()
       if (!r || r.ok !== false) {
-        station.noteSkip(false) // the platform will play what we queued
-        // the poll will see the new track and commit the step
+        station.noteSkip(false) // the platform plays what we already queued
+        // Keep our own books NOW rather than waiting for the poll: a second skip
+        // two seconds later would otherwise find a queue we think is full and a
+        // platform that has already emptied it. Same bookkeeping as commitTo.
+        const started = queuedRefs.current.shift()
+        if (started) {
+          station.advance()
+          expectedRef.current = started
+          handedOver.current.delete(started)
+          lastAuditAt.current = 0
+          setCover(null)
+        }
+        await topUpQueue() // and refill, so the next skip has somewhere to go
         rerender()
         return
       }
@@ -906,9 +951,12 @@ export function useRadio() {
         return
       }
     }
+    // Nothing of ours on the platform: `next` would land in the context, so the
+    // walk moves on and we start the track ourselves. The user asked for it, so
+    // a real `play` is the honest command here.
     station.skip()
     await startCurrent()
-  }, [provider, station, canQueue, startCurrent, rerender, flash])
+  }, [provider, station, canQueue, startCurrent, topUpQueue, reconcileQueue, rerender, flash])
 
   const jumpTo = useCallback(
     async (id) => {
@@ -947,9 +995,10 @@ export function useRadio() {
       const rules = typeof next === 'string' ? presetById(next) : next
       setRulesetState(rules)
       if (station) station.setRuleset(rules)
-      // A queue platform already holds one track decided by the old rules: let
-      // it play and let the walk re-decide from there (one track of lag, no
-      // interruption) rather than stacking a second choice behind it.
+      // A queue platform already holds a few tracks decided by the old rules,
+      // and Spotify has no way to take them back — the API only appends. So they
+      // play and the walk re-decides from there: a few tracks of lag, no
+      // interruption. Clearing the queue would mean restarting playback.
       rerender()
     },
     [station, rerender]

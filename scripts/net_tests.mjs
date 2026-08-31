@@ -661,6 +661,77 @@ export default async function run() {
       await context.close()
     }
 
+    /* 15 — skip once: the walk moves on and the queue is refilled */
+    if (want(15)) {
+      console.log('\n15 · one skip')
+      const world = makeWorld(startId)
+      const { context, page } = await openRadio(browser, world, { startId })
+      await settle(page, world)
+      await sleep(2500)
+      const depth0 = world.queue.length
+      const step0 = await ui.step(page)
+      const onAir = world.current
+      check('the platform is holding more than one track', depth0 >= 2, `${depth0} queued`)
+
+      await page.locator('.ctl[title^="Next"]').click()
+      await sleep(4000)
+      check('the track changed', world.current !== onAir)
+      check('it played what we had queued', world.current !== world.context[0])
+      check('the walk advanced by one', (await ui.step(page)) === step0 + 1,
+        `#${step0} → #${await ui.step(page)}`)
+      check('the queue was refilled at once', world.queue.length >= depth0 - 1,
+        `${depth0} → ${world.queue.length}`)
+      check('nothing was restarted', !world.calls.some((c) => c.includes('[restart]')))
+      await context.close()
+    }
+
+    /* 16 — three skips in a row, the case that was broken */
+    if (want(16)) {
+      console.log('\n16 · three skips in a row')
+      const world = makeWorld(startId)
+      const { context, page } = await openRadio(browser, world, { startId })
+      await settle(page, world)
+      await sleep(2500)
+      const first = world.context[0]
+      const seen = []
+      for (let i = 0; i < 3; i++) {
+        // eslint-disable-next-line no-await-in-loop
+        await page.locator('.ctl[title^="Next"]').click()
+        // eslint-disable-next-line no-await-in-loop
+        await sleep(2200)
+        seen.push(world.current)
+      }
+      console.log(`  played: ${seen.map((id) => (nodeById.get(id) || {}).title || id).join(' → ')}`)
+      check('three different tracks played', new Set(seen).size === 3, seen.join(', '))
+      check('it never fell back to the first track of the session',
+        !seen.includes(first), `first=${first}`)
+      check('the platform still holds something of ours', world.queue.length >= 1,
+        `${world.queue.length} queued`)
+      check('and nothing was restarted', !world.calls.some((c) => c.includes('[restart]')))
+      await context.close()
+    }
+
+    /* 17 — skip with nothing of ours on the platform: never `next` into the context */
+    if (want(17)) {
+      console.log('\n17 · skip when the platform queue is empty')
+      const world = makeWorld(startId)
+      const { context, page } = await openRadio(browser, world, { startId })
+      await settle(page, world)
+      await sleep(2500)
+      // Whatever we handed over is gone — someone else's play, a lost session.
+      world.queue = []
+      await sleep(3000) // let the audit notice
+      const nextBefore = world.calls.filter((c) => c === 'POST /me/player/next').length
+      await page.locator('.ctl[title^="Next"]').click()
+      await sleep(4000)
+      check('it did not send a bare next into an empty queue',
+        world.calls.filter((c) => c === 'POST /me/player/next').length === nextBefore,
+        `${world.calls.filter((c) => c === 'POST /me/player/next').length - nextBefore} sent`)
+      check('it started the next track itself', world.playing === true)
+      check('and not the first track of the session', world.current !== world.context[0] || world.context.length === 1)
+      await context.close()
+    }
+
     /* 8 — a real offline transition, end to end */
     if (want(8)) {
       console.log('\n8 · the browser itself goes offline and back')
