@@ -206,8 +206,17 @@ takes **100 URIs per call**, and a playlist holds 10,000 tracks.
 
 So depth is nearly free. The real cost is not requests or capacity, it is **how
 far ahead the walk is committed**: anything already in the playlist plays even if
-the rules change or the listener skips. That is why the queue depth is 1 while
-the app is on screen today.
+the rules change or the listener skips.
+
+That commitment is exactly what a queue cannot take back — `POST
+/me/player/queue` appends, and there is no endpoint that removes — which is why
+the depth on screen used to be a single track. It is three now, because depth 1
+made the skip button wrong: `next` on a queue holding one track empties it, and
+a second skip a moment later lands in the one-track context, i.e. back at the
+first track of the session. Three is the smallest depth that survives a run of
+skips; the price is that a rule change lands three tracks later instead of one.
+The playlist is the shape that stops paying that price, because its tail can be
+rewritten.
 
 But the commitment is **revocable**: the tail after the cursor can be removed and
 rewritten in one request. So depth costs a rewrite when the rules change, not
@@ -245,13 +254,15 @@ ever measured.
 | `scripts/net_tests.mjs` | what the radio does when the network comes and goes — Spotify stubbed at the network boundary with real state (a device, a current track, an actual queue), driven by Playwright. Every check asserts on what was **sent to the device** or what the screen **says** |
 | `scripts/fit_tests.mjs` | whether the layout holds at eleven window sizes: the cover square and clear of the top bar, the title, the controls and the footer; the sleeve turning on a click; the panel's search field inside its column |
 
-`net_tests.mjs` covers the eight cases that matter: a poll failing mid-track,
-a tap on play during an outage, recovery after Spotify has moved on, a request
-that never answers, a token refresh that fails for want of network, a refresh
-token that is genuinely dead, a pocket plus an outage, and a real
-`context.setOffline()` transition. It found a bug in the queue-depth rule that
-reading the code had not: a nine-minute track made the horizon look covered and
-left one track queued behind it.
+`net_tests.mjs` covers the cases that matter: a poll failing mid-track, a tap on
+play during an outage, recovery after Spotify has moved on, a request that never
+answers, a token refresh that fails for want of network, a refresh token that is
+genuinely dead, a pocket plus an outage, a real `context.setOffline()`
+transition, repeat and shuffle found on and refused, and skipping — once, three
+times in a row, and into a queue the platform has emptied under us. It found two
+bugs that reading the code had not: a nine-minute track made the queue-depth
+horizon look covered and left one track queued behind it, and a skip trusted a
+record of the queue that the platform no longer agreed with.
 
 `fit_tests.mjs` exists because the square cover has broken four times, each time
 differently and each time invisibly at whatever window size the author happened
