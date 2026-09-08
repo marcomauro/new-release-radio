@@ -486,6 +486,10 @@ export function createConnectProvider() {
           }
         }
         if (!s || !s.item) {
+          // Nothing is loaded — no device, or an idle one. Whatever we last saw
+          // on air is not there to resume: the next `start` must be a `play`,
+          // or it would "resume" into a player holding nothing.
+          lastRef = null
           return makeSnapshot({
             playing: false,
             message: notice.text || (started ? '' : 'ready'),

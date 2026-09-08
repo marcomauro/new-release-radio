@@ -56,6 +56,22 @@
    everything that played while it was blind, and starts the next track. A pause
    anywhere else in a track is somebody pressing pause, and pause is sacred.
 
+   **A device that has gone looks the same.** The Spotify app suspended in a
+   pocket, a speaker switched off: the API answers 204 — no item, position 0,
+   an empty queue — which is the ran-out shape exactly, and a `play` into it
+   makes no sound. The recovery used to fire again every cooldown, advancing the
+   walk one track each time: a programme read out on screen with nothing on
+   air. Three rules now bound it. (1) A recovery is `pending` until the
+   platform is actually seen playing again; while pending the walk does not
+   move, the `play` is repeated once, and then the radio STOPS and says so —
+   `RECOVERY_TRIES`. (2) A refused `play` (404: no device) stops it at once,
+   with Spotify's reason on screen. (3) How far to advance is decided from
+   evidence, `stepsRanOut`: the platform's word when it shows a track behind
+   us, the clock when it shows nothing — a track cannot have finished before
+   its own end, so a device that died mid-track costs a restart of that track,
+   not the tracks queued behind it. A pause seen mid-track before the device
+   went idle stays a pause.
+
    **Two radios, one account — and why there is no detection of it here.** A
    phone and a desktop can both run this app against one Spotify account, and
    then both are steering. There is no lock to take: the two devices share
@@ -76,7 +92,7 @@ import { loadArchive } from '../core/graph.js'
 import { createStation, randomSeed } from '../core/walker.js'
 import { DEFAULT_RULESET, presetById } from '../core/rules.js'
 import { createProviders, preferredProviderId, CAPS } from '../providers/index.js'
-import { makeSnapshot } from '../providers/provider.js'
+import { makeSnapshot, ok } from '../providers/provider.js'
 import { completeLoginIfNeeded, isLoggedIn } from '../providers/spotify/auth.js'
 import { prefetchCovers } from '../providers/spotify/artwork.js'
 
@@ -139,6 +155,11 @@ const SKIP_AUDIT_MS = 1500
 // After recovering an exhausted stream, wait this long before doing it again.
 // A restart that does not take must not become a loop of restarts.
 const RECOVERY_COOLDOWN_MS = 15000
+// How many `play`s a recovery may send before it gives up. A cooldown alone
+// did not bound anything: it only set the tempo of a loop that advanced the
+// walk one track per cycle into a device that had stopped listening — a
+// radio moving through its programme on screen with nothing on air.
+const RECOVERY_TRIES = 2
 // A stop at the very beginning of a track is the platform running out; a stop
 // anywhere else is somebody pressing pause.
 const RAN_OUT_POSITION_MS = 2000
@@ -172,6 +193,47 @@ const browserOffline = () => typeof navigator !== 'undefined' && navigator.onLin
  * not tell us stays as it was; only the position moves, and only for as long as
  * moving it is honest.
  */
+/**
+ * The platform has stopped at position ~0 with nothing of ours queued. How many
+ * tracks — the one we believe on air, plus those queued behind it — have
+ * actually finished? Or is this not a stream running out at all?
+ *
+ *   -1  leave it alone: a track boundary, a pause the user made, or one look
+ *       too few to tell;
+ *    0  the device stopped mid-track (or never started it): start it again;
+ *   n>0 that many steps of the walk have played while we were blind.
+ *
+ * `ref` is what the platform shows now, if anything; `seen` is the last answer
+ * that named a track. When the device has gone (no item at all), `seen` is the
+ * only evidence there is, and time is the ruler: a track cannot have finished
+ * before its own end.
+ */
+function stepsRanOut({ ref, seen, expected, aheadRefs, aheadNodes, behind }) {
+  const shown = ref || (seen && seen.ref) || null
+  if (!shown) return behind + 1 // never saw a track: the platform's word is all there is
+  // The next track of ours is loading, not running out — the ref-change branch
+  // commits it. Acting here would `play` two tracks ahead and skip one.
+  if (aheadRefs.includes(shown)) return -1
+  // A track behind us: the player fell back to its one-track context, which it
+  // does only once everything queued has played.
+  if (shown !== expected) return behind + 1
+  // What is shown is the track we believe on air, and it is not playing.
+  if (!seen || seen.ref !== shown) return -1 // one look is not enough: see it stopped twice
+  // Paused mid-track and the device went idle: a pause, and pause is sacred.
+  // Paused at the very start: loaded and never started, a stall.
+  if (!seen.playing) return seen.position >= RAN_OUT_POSITION_MS ? -1 : 0
+  // It was playing when last seen. Count what can have finished since.
+  let t = Date.now() - seen.at - Math.max(0, (seen.duration || FALLBACK_TRACK_MS) - seen.position)
+  if (t < 0) return 0
+  let n = 1
+  for (const u of aheadNodes) {
+    t -= (u.node.duration_sec || FALLBACK_TRACK_MS / 1000) * 1000
+    if (t < 0) break
+    n += 1
+  }
+  return Math.min(n, behind + 1)
+}
+
 function holdOver(good, message) {
   const base = good && good.snap
   if (!base) return makeSnapshot({ message, stale: true })
@@ -225,6 +287,13 @@ export function useRadio() {
   const pausedByUs = useRef(false) // we asked for the pause, so do not undo it
   const hasPlayed = useRef(false) // the platform has actually played at least once
   const lastRecoveryAt = useRef(0)
+  // The last answer that named a track: { ref, position, duration, playing, at }.
+  // A device that vanished (204, no item) answers no questions about what it
+  // played before it went; this is the evidence that stands in for it.
+  const lastOnAir = useRef(null)
+  // A recovery is `pending` until the platform is seen playing again. Nothing
+  // is recovered twice on the strength of a `play` that produced no playback.
+  const recovery = useRef({ pending: false, tries: 0 })
   const adoptedRef = useRef(false) // did we already look for a running session?
   const justLoggedInRef = useRef(false)
   const loginErrorRef = useRef('')
@@ -530,13 +599,17 @@ export function useRadio() {
     queuedRefs.current = []
     handedOver.current = new Set()
     const r = await provider.start(station.current)
-    if (r && r.ok === false && r.kind === 'network') {
-      flash(r.message)
+    if (r && r.ok === false) {
+      // Nothing of ours is playing, so there is nothing to queue behind. The
+      // result goes back to the caller: a recovery needs to know the `play` it
+      // sent was refused, and why.
+      if (r.kind === 'network') flash(r.message)
       rerender()
-      return
+      return r
     }
     await topUpQueue()
     rerender()
+    return r || ok()
   }, [provider, station, topUpQueue, rerender, flash])
 
   // advance the walk without touching the platform (it already moved on)
@@ -694,10 +767,21 @@ export function useRadio() {
         if (snap.playing) {
           hasPlayed.current = true
           pausedByUs.current = false // it is playing, whoever asked for it
+          recovery.current = { pending: false, tries: 0 } // whatever we sent, it took
         }
 
         if (canQueue) {
           const ref = snap.ref
+          const seen = lastOnAir.current
+          if (ref) {
+            lastOnAir.current = {
+              ref,
+              position: snap.position || 0,
+              duration: snap.duration || 0,
+              playing: !!snap.playing,
+              at: Date.now(),
+            }
+          }
 
           // **The stream ran out.** Everything we handed over has played and the
           // platform has nothing left, so it stopped — and because the station
@@ -711,6 +795,15 @@ export function useRadio() {
           //
           // A stop at position ~0 with an empty platform queue is running out; a
           // stop anywhere else is somebody pressing pause, and pause is sacred.
+          //
+          // The same shape is also what a device that has GONE looks like — the
+          // Spotify app suspended in a pocket answers 204, no item, position 0,
+          // an empty queue — and a `play` into that produces no sound. So a
+          // recovery is allowed to happen once; a second one only after the
+          // platform has actually been seen playing again. Until then the
+          // walk does not move, the `play` is repeated once, and then the
+          // radio stops and says so, rather than reading out a programme
+          // nobody can hear.
           if (
             !snap.playing &&
             hasPlayed.current &&
@@ -719,16 +812,54 @@ export function useRadio() {
             Date.now() - lastRecoveryAt.current > RECOVERY_COOLDOWN_MS &&
             provider.queuedRefs
           ) {
+            const rec = recovery.current
+            const giveUp = (why) => {
+              recovery.current = { pending: false, tries: 0 }
+              setWantsPlay(false)
+              setNotice(`${why} — press ▶ to try again`)
+            }
+            if (rec.pending) {
+              // The last `play` was accepted and nothing came of it.
+              if (rec.tries >= RECOVERY_TRIES) {
+                const out = provider.currentOutput ? provider.currentOutput() : null
+                giveUp(
+                  `Spotify accepted the command but ${out ? out.name : 'the device'} did not start playing`
+                )
+                return
+              }
+              rec.tries += 1
+              lastRecoveryAt.current = Date.now()
+              flash('Spotify did not start — trying once more')
+              const r = await startCurrent()
+              if (r && r.ok === false && r.kind !== 'network') giveUp(`playback did not start: ${r.message}`)
+              return
+            }
             const behind = queuedRefs.current.length
             const asked = await reconcileQueue()
             if (asked && queuedRefs.current.length === 0) {
-              // Those `behind` tracks played while we were not watching, plus the
-              // one that just finished: the walk is that far back.
-              for (let i = 0; i <= behind; i++) station.advance()
-              lastRecoveryAt.current = Date.now()
-              flash('the stream ran out — picking the walk back up')
-              await startCurrent()
-              return
+              const aheadNodes = station.upNext(RECONCILE_WINDOW)
+              const aheadRefs = await Promise.all(aheadNodes.map((u) => provider.resolve(u.node)))
+              const steps = stepsRanOut({
+                ref,
+                seen,
+                expected: expectedRef.current,
+                aheadRefs,
+                aheadNodes,
+                behind,
+              })
+              if (steps >= 0) {
+                for (let i = 0; i < steps; i++) station.advance()
+                lastRecoveryAt.current = Date.now()
+                flash(
+                  steps > 0
+                    ? 'the stream ran out — picking the walk back up'
+                    : 'Spotify stopped mid-track — starting it again'
+                )
+                const r = await startCurrent()
+                recovery.current = { pending: true, tries: 1 }
+                if (r && r.ok === false && r.kind !== 'network') giveUp(`playback did not start: ${r.message}`)
+                return
+              }
             }
           }
 
@@ -871,6 +1002,8 @@ export function useRadio() {
    */
   const play = useCallback(async () => {
     setWantsPlay(true)
+    setNotice('') // a stopped radio explained itself; the user has answered
+    recovery.current = { pending: false, tries: 0 }
     if (!provider || !station) return
     let snap = snapRef.current
     if (snap && snap.stale && tickRef.current) {

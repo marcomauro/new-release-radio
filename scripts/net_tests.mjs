@@ -79,6 +79,14 @@ function makeWorld(startId) {
     // A device that refuses to change them (some do), so the app has to say so.
     refuseModes: false,
     volume: DEVICE.volume_percent,
+    // The device has GONE — the Spotify app suspended in a pocket, a speaker
+    // switched off. Spotify answers 204 to "what is playing", lists no device,
+    // and refuses every command with 404. From the outside this looks exactly
+    // like a stream that ran out: not playing, position 0, nothing queued.
+    gone: false,
+    // The device is there and accepts every command, and nothing comes of it:
+    // `play` is 204, the track is loaded, and `is_playing` never turns true.
+    deaf: false,
     tokenMode: 'ok', // 'ok' | 'fail' | 'invalid_grant'
     seen: [], // every request the stub was asked for, fulfilled or not
     calls: [], // every request it actually answered: `${method} ${path}`
@@ -112,8 +120,19 @@ const item = (id) => {
 const idFromUri = (uri) => (uri || '').replace('spotify:track:', '')
 
 /** Answer one Spotify Web API request against the world. */
+const NO_DEVICE = {
+  status: 404,
+  json: { error: { status: 404, message: 'Device not found', reason: 'NO_ACTIVE_DEVICE' } },
+}
+
 function answer(world, method, path, search, body) {
   const p = path.replace('/v1', '')
+  if (world.gone) {
+    if (method === 'GET' && p === '/me/player') return { status: 204 }
+    if (method === 'GET' && p === '/me/player/devices') return { json: { devices: [] } }
+    if (method === 'GET' && p === '/me/player/queue') return { json: { currently_playing: null, queue: [] } }
+    if (p.startsWith('/me/player')) return NO_DEVICE
+  }
   if (method === 'GET' && p === '/me/player') {
     if (!world.current) return { status: 204 }
     return {
@@ -140,6 +159,8 @@ function answer(world, method, path, search, body) {
   }
   if (method === 'PUT' && p === '/me/player/play') {
     const uris = body && body.uris
+    // A resume with nothing loaded has nothing to resume.
+    if (!(uris && uris.length) && !world.current) return NO_DEVICE
     if (uris && uris.length) {
       // A real `play` replaces the context: this is the restart we must never
       // see happen from a stale state.
@@ -148,7 +169,7 @@ function answer(world, method, path, search, body) {
       world.queue = []
       world.context = uris.map(idFromUri)
     }
-    world.playing = true
+    world.playing = !world.deaf
     return { status: 204 }
   }
   if (method === 'PUT' && p === '/me/player/pause') {
@@ -165,7 +186,7 @@ function answer(world, method, path, search, body) {
     if (nextId) {
       world.current = nextId
       world.position = 0
-      world.playing = true
+      world.playing = !world.deaf
     } else {
       afterQueue(world)
     }
@@ -600,6 +621,12 @@ export default async function run() {
       const world = makeWorld(startId)
       const { context, page } = await openRadio(browser, world, { startId })
       await settle(page, world)
+      // One track into the session, so that the first track is BEHIND the walk
+      // — as it is whenever this happens for real. (At step 1 the track on air
+      // IS the first track, and a stop at its position 0 twelve seconds after
+      // it was seen playing is a stall of that track, not three tracks played.)
+      await page.locator('.ctl[title^="Next"]').click()
+      await sleep(3000)
       const step0 = await ui.step(page)
       const first = world.context[0]
       const behind = world.queue.length
@@ -729,6 +756,109 @@ export default async function run() {
         `${world.calls.filter((c) => c === 'POST /me/player/next').length - nextBefore} sent`)
       check('it started the next track itself', world.playing === true)
       check('and not the first track of the session', world.current !== world.context[0] || world.context.length === 1)
+      await context.close()
+    }
+
+    /* 18 — the device vanishes mid-track: the bug as reported */
+    if (want(18)) {
+      console.log('\n18 · the device disappears mid-track')
+      const world = makeWorld(startId)
+      const { context, page } = await openRadio(browser, world, { startId })
+      await settle(page, world)
+      const step0 = await ui.step(page)
+      const title0 = await ui.title(page)
+      // The Spotify app is suspended by the phone. To the API the device is
+      // simply gone: 204, no item, an empty queue, and 404 to every command.
+      world.gone = true
+      // One recovery, its refusal, and then the radio must have said its piece.
+      await page.waitForFunction(
+        () => /press ▶/.test((document.querySelector('.notice') || {}).textContent || ''),
+        null,
+        { timeout: 30000 }
+      ).catch(() => {})
+      const notice = await ui.notice(page)
+      const restarts = () => world.calls.filter((c) => c.includes('[restart]')).length
+      const r1 = restarts()
+      check('the radio stopped and said why', /press ▶/.test(notice), notice)
+      check('the play button is offered', await ui.paused(page))
+      check('it tried to start the track at most once', r1 <= 1, `${r1} play command(s)`)
+      check('the walk did not move: the track never finished', (await ui.step(page)) === step0,
+        `#${step0} → #${await ui.step(page)}`)
+      check('the same track is still on screen', (await ui.title(page)) === title0)
+      // And then it stays stopped: no loop of one track per cooldown.
+      await sleep(20000)
+      check('no further play was sent while the device was gone', restarts() === r1,
+        `${restarts()} after 20 s more`)
+      check('the walk still did not move', (await ui.step(page)) === step0,
+        `#${step0} → #${await ui.step(page)}`)
+      // The user opens Spotify again and presses ▶: one play, and the walk goes on.
+      world.gone = false
+      world.playing = false
+      world.current = null
+      await page.locator('.ctl.main[title="Play"]').click()
+      await sleep(4000)
+      check('▶ started it again', world.playing === true && world.current !== null,
+        `playing=${world.playing} current=${world.current}`)
+      check('and the notice is gone', !/press ▶/.test(await ui.notice(page)), await ui.notice(page))
+      await context.close()
+    }
+
+    /* 19 — the stream really ran out, and the device accepts a play it never performs */
+    if (want(19)) {
+      console.log('\n19 · the stream ran out, and the recovery is accepted but silent')
+      const world = makeWorld(startId)
+      const { context, page } = await openRadio(browser, world, { startId })
+      await settle(page, world)
+      await page.locator('.ctl[title^="Next"]').click() // see case 12
+      await sleep(3000)
+      const step0 = await ui.step(page)
+      const behind = world.queue.length
+      // Everything queued has played and the player fell back to the context.
+      // The device is still there — and from now on it accepts every command
+      // and plays none of them.
+      world.deaf = true
+      world.queue = []
+      world.current = world.context[0]
+      world.position = 0
+      world.playing = false
+      await page.waitForFunction(
+        () => /press ▶/.test((document.querySelector('.notice') || {}).textContent || ''),
+        null,
+        { timeout: 60000 }
+      ).catch(() => {})
+      // The first is a `play` of the next track; the retry finds that track
+      // loaded and paused on the device, so it is a resume — a play command
+      // either way, and there must be exactly two of them.
+      const plays = world.calls.filter((c) => c.startsWith('PUT /me/player/play')).length
+      const step1 = await ui.step(page)
+      const notice = await ui.notice(page)
+      check('the walk was picked up once, past everything that had played',
+        step1 === step0 + behind + 1, `#${step0} → #${step1}, ${behind} had been queued`)
+      check('the play was repeated once and no more', plays === 2, `${plays} play command(s)`)
+      check('then the radio stopped and named the device', /did not start playing/.test(notice) && /press ▶/.test(notice), notice)
+      check('the play button is offered', await ui.paused(page))
+      await context.close()
+    }
+
+    /* 20 — a pause from the Spotify app, and then the device goes idle */
+    if (want(20)) {
+      console.log('\n20 · the user pauses in the Spotify app, then the device goes idle')
+      const world = makeWorld(startId)
+      const { context, page } = await openRadio(browser, world, { startId })
+      await settle(page, world)
+      const step0 = await ui.step(page)
+      world.playing = false
+      world.position = 96000
+      await sleep(4000) // the radio sees the pause, mid-track
+      // An idle device drops off the API: 204, nothing queued — position 0 by
+      // default, which used to read as "ran out" and restart the music on its own.
+      world.gone = true
+      await sleep(12000)
+      check('no play command was sent', !world.calls.some((c) => c.includes('[restart]')),
+        world.calls.filter((c) => c.includes('player/play')).join(', '))
+      check('the walk did not move', (await ui.step(page)) === step0)
+      check('nothing about a stream running out was said', !/ran out|stopped/.test(await ui.notice(page)),
+        await ui.notice(page))
       await context.close()
     }
 
