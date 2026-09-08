@@ -61,11 +61,17 @@
    an empty queue — which is the ran-out shape exactly, and a `play` into it
    makes no sound. The recovery used to fire again every cooldown, advancing the
    walk one track each time: a programme read out on screen with nothing on
-   air. Three rules now bound it. (1) A recovery is `pending` until the
-   platform is actually seen playing again; while pending the walk does not
-   move, the `play` is repeated once, and then the radio STOPS and says so —
-   `RECOVERY_TRIES`. (2) A refused `play` (404: no device) stops it at once,
-   with Spotify's reason on screen. (3) How far to advance is decided from
+   air. And the Spotify desktop left idle does a quieter version of the same
+   thing: it takes a `play` addressed to it and sits there — pause glyph, no
+   track — so ▶ appeared to do nothing. Three rules now bound all of it.
+   (1) EVERY `play` we send is `pending` until the platform is actually seen
+   playing; after START_GRACE_MS of silence it is sent once more, bringing the
+   device forward with a transfer first, and then the radio STOPS and says
+   what to do — `RECOVERY_TRIES`. While pending the walk never moves. A device
+   that is not the active one gets the transfer before its first `play` too,
+   which is what the Spotify app itself does. (2) A refused `play` (404: no
+   device) stops it at once, with Spotify's reason on screen. (3) How far a
+   ran-out recovery advances is decided from
    evidence, `stepsRanOut`: the platform's word when it shows a track behind
    us, the clock when it shows nothing — a track cannot have finished before
    its own end, so a device that died mid-track costs a restart of that track,
@@ -155,10 +161,14 @@ const SKIP_AUDIT_MS = 1500
 // After recovering an exhausted stream, wait this long before doing it again.
 // A restart that does not take must not become a loop of restarts.
 const RECOVERY_COOLDOWN_MS = 15000
-// How many `play`s a recovery may send before it gives up. A cooldown alone
-// did not bound anything: it only set the tempo of a loop that advanced the
-// walk one track per cycle into a device that had stopped listening — a
-// radio moving through its programme on screen with nothing on air.
+// Every `play` we send is pending until the platform is seen playing. This is
+// how long it gets before we act on the silence — Connect wakes a desktop in a
+// few seconds, a speaker in up to ten — and how many `play`s in a row may go
+// unanswered before the radio stops and says so. A cooldown alone did not
+// bound anything: it only set the tempo of a loop that advanced the walk one
+// track per cycle into a device that had stopped listening — a radio moving
+// through its programme on screen with nothing on air.
+const START_GRACE_MS = 10000
 const RECOVERY_TRIES = 2
 // A stop at the very beginning of a track is the platform running out; a stop
 // anywhere else is somebody pressing pause.
@@ -291,9 +301,10 @@ export function useRadio() {
   // A device that vanished (204, no item) answers no questions about what it
   // played before it went; this is the evidence that stands in for it.
   const lastOnAir = useRef(null)
-  // A recovery is `pending` until the platform is seen playing again. Nothing
-  // is recovered twice on the strength of a `play` that produced no playback.
-  const recovery = useRef({ pending: false, tries: 0 })
+  // Every `play` we send is `pending` until the platform is seen playing.
+  // Nothing is sent twice on the strength of a `play` that produced no
+  // playback, and the walk never moves on one.
+  const recovery = useRef({ pending: false, since: 0, tries: 0 })
   const adoptedRef = useRef(false) // did we already look for a running session?
   const justLoggedInRef = useRef(false)
   const loginErrorRef = useRef('')
@@ -590,27 +601,52 @@ export function useRadio() {
     }
   }, [canQueue, provider, station, targetDepth, reconcileQueue])
 
-  const startCurrent = useCallback(async () => {
-    if (!provider || !station || !station.current) return
-    pausedByUs.current = false
-    const ref = await provider.resolve(station.current)
-    expectedRef.current = ref
-    // `play(uri)` replaces the platform's context: whatever we had queued is gone.
-    queuedRefs.current = []
-    handedOver.current = new Set()
-    const r = await provider.start(station.current)
-    if (r && r.ok === false) {
-      // Nothing of ours is playing, so there is nothing to queue behind. The
-      // result goes back to the caller: a recovery needs to know the `play` it
-      // sent was refused, and why.
-      if (r.kind === 'network') flash(r.message)
+  /**
+   * Start the walk's current track on the platform. `wake` asks the provider to
+   * bring the device forward first (a transfer) — for a device that took the
+   * last `play` and did nothing with it.
+   */
+  const startCurrent = useCallback(
+    async ({ wake = false } = {}) => {
+      if (!provider || !station || !station.current) return
+      pausedByUs.current = false
+      const ref = await provider.resolve(station.current)
+      expectedRef.current = ref
+      // `play(uri)` replaces the platform's context: whatever we had queued is gone.
+      queuedRefs.current = []
+      handedOver.current = new Set()
+      const r = await provider.start(station.current, { wake })
+      if (r && r.ok === false) {
+        // Nothing of ours is playing, so there is nothing to queue behind. The
+        // result goes back to the caller: a recovery needs to know the `play` it
+        // sent was refused, and why.
+        if (r.kind === 'network') flash(r.message)
+        rerender()
+        return r
+      }
+      // Accepted is not playing. The poll decides which, from here on.
+      const rec = recovery.current
+      recovery.current = { pending: true, since: Date.now(), tries: rec.pending ? rec.tries + 1 : 1 }
+      await topUpQueue()
       rerender()
-      return r
-    }
-    await topUpQueue()
-    rerender()
-    return r || ok()
-  }, [provider, station, topUpQueue, rerender, flash])
+      return r || ok()
+    },
+    [provider, station, topUpQueue, rerender, flash]
+  )
+
+  /**
+   * The platform took our `play` and nothing came of it, twice — or refused it
+   * outright. Stop, and say why: a radio that keeps sending commands into
+   * silence is worse than one that asks to be started again.
+   */
+  const giveUp = useCallback(
+    (why) => {
+      recovery.current = { pending: false, since: 0, tries: 0 }
+      setWantsPlay(false)
+      setNotice(why)
+    },
+    []
+  )
 
   // advance the walk without touching the platform (it already moved on)
   const commitTo = useCallback(
@@ -767,7 +803,7 @@ export function useRadio() {
         if (snap.playing) {
           hasPlayed.current = true
           pausedByUs.current = false // it is playing, whoever asked for it
-          recovery.current = { pending: false, tries: 0 } // whatever we sent, it took
+          recovery.current = { pending: false, since: 0, tries: 0 } // whatever we sent, it took
         }
 
         if (canQueue) {
@@ -781,6 +817,31 @@ export function useRadio() {
               playing: !!snap.playing,
               at: Date.now(),
             }
+          }
+
+          // **A `play` that was accepted and did nothing.** The Spotify desktop
+          // left idle takes the command and sits there — pause glyph, no track,
+          // "find something to play"; a device that has gone takes nothing at
+          // all. Either way the screen used to show ▶ doing nothing, or a walk
+          // moving on with nothing on air. Whatever we sent gets START_GRACE_MS
+          // to be seen playing; then it is sent once more, this time bringing
+          // the device forward first; then the radio stops and says so.
+          const rec = recovery.current
+          if (rec.pending && !snap.playing && Date.now() - rec.since > START_GRACE_MS) {
+            const out = provider.currentOutput ? provider.currentOutput() : null
+            const name = out ? out.name : 'the device'
+            if (rec.tries >= RECOVERY_TRIES) {
+              giveUp(
+                `Spotify accepted the command but ${name} did not start playing — press play once in Spotify on that device, then ▶ here`
+              )
+              return
+            }
+            flash(`${name} did not start — trying once more`)
+            const r = await startCurrent({ wake: true })
+            if (r && r.ok === false && r.kind !== 'network') {
+              giveUp(`playback did not start: ${r.message} — press ▶ to try again`)
+            }
+            return
           }
 
           // **The stream ran out.** Everything we handed over has played and the
@@ -799,41 +860,18 @@ export function useRadio() {
           // The same shape is also what a device that has GONE looks like — the
           // Spotify app suspended in a pocket answers 204, no item, position 0,
           // an empty queue — and a `play` into that produces no sound. So a
-          // recovery is allowed to happen once; a second one only after the
-          // platform has actually been seen playing again. Until then the
-          // walk does not move, the `play` is repeated once, and then the
-          // radio stops and says so, rather than reading out a programme
-          // nobody can hear.
+          // recovery happens once, and the `play` it sends is pending like any
+          // other (above): the walk does not move again until the platform has
+          // actually been seen playing.
           if (
             !snap.playing &&
+            !rec.pending &&
             hasPlayed.current &&
             !pausedByUs.current &&
             (snap.position || 0) < RAN_OUT_POSITION_MS &&
             Date.now() - lastRecoveryAt.current > RECOVERY_COOLDOWN_MS &&
             provider.queuedRefs
           ) {
-            const rec = recovery.current
-            const giveUp = (why) => {
-              recovery.current = { pending: false, tries: 0 }
-              setWantsPlay(false)
-              setNotice(`${why} — press ▶ to try again`)
-            }
-            if (rec.pending) {
-              // The last `play` was accepted and nothing came of it.
-              if (rec.tries >= RECOVERY_TRIES) {
-                const out = provider.currentOutput ? provider.currentOutput() : null
-                giveUp(
-                  `Spotify accepted the command but ${out ? out.name : 'the device'} did not start playing`
-                )
-                return
-              }
-              rec.tries += 1
-              lastRecoveryAt.current = Date.now()
-              flash('Spotify did not start — trying once more')
-              const r = await startCurrent()
-              if (r && r.ok === false && r.kind !== 'network') giveUp(`playback did not start: ${r.message}`)
-              return
-            }
             const behind = queuedRefs.current.length
             const asked = await reconcileQueue()
             if (asked && queuedRefs.current.length === 0) {
@@ -856,8 +894,9 @@ export function useRadio() {
                     : 'Spotify stopped mid-track — starting it again'
                 )
                 const r = await startCurrent()
-                recovery.current = { pending: true, tries: 1 }
-                if (r && r.ok === false && r.kind !== 'network') giveUp(`playback did not start: ${r.message}`)
+                if (r && r.ok === false && r.kind !== 'network') {
+                  giveUp(`playback did not start: ${r.message} — press ▶ to try again`)
+                }
                 return
               }
             }
@@ -929,6 +968,7 @@ export function useRadio() {
     archive,
     commitTo,
     startCurrent,
+    giveUp,
     topUpQueue,
     reconcileQueue,
     flushOutbox,
@@ -1003,7 +1043,7 @@ export function useRadio() {
   const play = useCallback(async () => {
     setWantsPlay(true)
     setNotice('') // a stopped radio explained itself; the user has answered
-    recovery.current = { pending: false, tries: 0 }
+    recovery.current = { pending: false, since: 0, tries: 0 }
     if (!provider || !station) return
     let snap = snapRef.current
     if (snap && snap.stale && tickRef.current) {
@@ -1017,8 +1057,13 @@ export function useRadio() {
     pausedByUs.current = false
     const onAir = !!(snap && snap.ref && snap.ref === expectedRef.current)
     if (onAir && snap.playing) return // already playing: nothing to restart
-    if (onAir) await provider.resume()
-    else await startCurrent()
+    if (onAir) {
+      await provider.resume()
+      // A resume is a `play` too: pending until the platform is seen playing.
+      recovery.current = { pending: true, since: Date.now(), tries: 1 }
+    } else {
+      await startCurrent()
+    }
   }, [provider, station, startCurrent, flash])
 
   const pause = useCallback(async () => {

@@ -71,7 +71,7 @@ Check what happens when the network comes and goes — the hardest thing to test
 hand, and the source of the worst bug this app has had:
 
 ```bash
-node scripts/net_tests.mjs           # 20 cases, ~12 minutes
+node scripts/net_tests.mjs           # 22 cases, ~14 minutes
 node scripts/net_tests.mjs --only 3  # just the recovery case
 node scripts/net_tests.mjs --headed  # watch it happen
 ```

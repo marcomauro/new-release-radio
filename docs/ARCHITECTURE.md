@@ -132,11 +132,16 @@ Two consequences worth stating on their own:
   verified before it is repeated.** The Spotify app suspended in a pocket answers
   204 — no item, position 0, an empty queue — and a `play` into it makes no
   sound. The recovery used to fire again every cooldown and advance the walk one
-  track each time: the screen read out a programme with nothing on air. Now a
-  recovery stays *pending* until the platform is seen playing again; while
-  pending the walk does not move, the `play` is repeated once, and then the radio
-  stops and says so (`RECOVERY_TRIES`). A refused `play` stops it at once, with
-  Spotify's reason. And how far the walk advances is decided from evidence
+  track each time: the screen read out a programme with nothing on air. The
+  Spotify desktop left idle does a quieter version of the same: it takes a
+  `play` addressed to it and sits there, pause glyph and no track, so ▶ appeared
+  to do nothing. Now *every* `play` we send stays pending until the platform is
+  seen playing; after `START_GRACE_MS` of silence it is sent once more, bringing
+  the device forward with a transfer first, and then the radio stops and says
+  what to do (`RECOVERY_TRIES`). While pending the walk does not move. A device
+  that is not the active one gets that transfer before its first `play` as well —
+  it is what the Spotify app itself does. A refused `play` stops it at once, with
+  Spotify's reason. And how far a ran-out recovery advances is decided from evidence
   (`stepsRanOut`): the platform's word when it shows a track behind us, the
   clock when it shows nothing — a track cannot have finished before its own end,
   so a device that died mid-track costs a restart of that track, not the tracks
@@ -274,12 +279,14 @@ answers, a token refresh that fails for want of network, a refresh token that is
 genuinely dead, a pocket plus an outage, a real `context.setOffline()`
 transition, repeat and shuffle found on and refused, skipping — once, three
 times in a row, and into a queue the platform has emptied under us — and a
-device that vanishes, one that accepts a `play` and never performs it, and a
-pause followed by the device going idle. It found three bugs that reading the
-code had not: a nine-minute track made the queue-depth horizon look covered and
-left one track queued behind it; a skip trusted a record of the queue that the
-platform no longer agreed with; and the ran-out recovery, given a device that
-had gone, advanced the walk one track per cooldown for ever.
+device that vanishes, one that accepts a `play` and never performs it, a pause
+followed by the device going idle, and a cold ▶ on the Spotify desktop left idle
+— which loads the track and does not play it until brought forward. It found
+three bugs that reading the code had not: a nine-minute track made the
+queue-depth horizon look covered and left one track queued behind it; a skip
+trusted a record of the queue that the platform no longer agreed with; and the
+ran-out recovery, given a device that had gone, advanced the walk one track per
+cooldown for ever.
 
 `fit_tests.mjs` exists because the square cover has broken four times, each time
 differently and each time invisibly at whatever window size the author happened
