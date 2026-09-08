@@ -128,6 +128,20 @@ Two consequences worth stating on their own:
   with nothing of ours left on the platform is read as "the stream ran out": the
   walk advances past everything that played while we were blind and starts the
   next track. A stop anywhere else in a track is a pause, and pause is sacred.
+- **A device that has gone wears the same shape, and a recovery has to be
+  verified before it is repeated.** The Spotify app suspended in a pocket answers
+  204 — no item, position 0, an empty queue — and a `play` into it makes no
+  sound. The recovery used to fire again every cooldown and advance the walk one
+  track each time: the screen read out a programme with nothing on air. Now a
+  recovery stays *pending* until the platform is seen playing again; while
+  pending the walk does not move, the `play` is repeated once, and then the radio
+  stops and says so (`RECOVERY_TRIES`). A refused `play` stops it at once, with
+  Spotify's reason. And how far the walk advances is decided from evidence
+  (`stepsRanOut`): the platform's word when it shows a track behind us, the
+  clock when it shows nothing — a track cannot have finished before its own end,
+  so a device that died mid-track costs a restart of that track, not the tracks
+  queued behind it. A pause seen mid-track before the device went idle stays a
+  pause.
 - **Repeat and shuffle are the user's, and both are fatal to a walk.** They live
   on the account and survive between sessions, so the radio sets them off when a
   station starts, watches them on every poll, and after three refusals says which
@@ -258,11 +272,14 @@ ever measured.
 play during an outage, recovery after Spotify has moved on, a request that never
 answers, a token refresh that fails for want of network, a refresh token that is
 genuinely dead, a pocket plus an outage, a real `context.setOffline()`
-transition, repeat and shuffle found on and refused, and skipping — once, three
-times in a row, and into a queue the platform has emptied under us. It found two
-bugs that reading the code had not: a nine-minute track made the queue-depth
-horizon look covered and left one track queued behind it, and a skip trusted a
-record of the queue that the platform no longer agreed with.
+transition, repeat and shuffle found on and refused, skipping — once, three
+times in a row, and into a queue the platform has emptied under us — and a
+device that vanishes, one that accepts a `play` and never performs it, and a
+pause followed by the device going idle. It found three bugs that reading the
+code had not: a nine-minute track made the queue-depth horizon look covered and
+left one track queued behind it; a skip trusted a record of the queue that the
+platform no longer agreed with; and the ran-out recovery, given a device that
+had gone, advanced the walk one track per cooldown for ever.
 
 `fit_tests.mjs` exists because the square cover has broken four times, each time
 differently and each time invisibly at whatever window size the author happened
