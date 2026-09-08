@@ -87,6 +87,10 @@ function makeWorld(startId) {
     // The device is there and accepts every command, and nothing comes of it:
     // `play` is 204, the track is loaded, and `is_playing` never turns true.
     deaf: false,
+    // The device is idle: it takes a `play` addressed to it and loads the track
+    // without playing — until a transfer brings it forward. The Spotify desktop
+    // left open with nothing on does exactly this.
+    asleep: false,
     tokenMode: 'ok', // 'ok' | 'fail' | 'invalid_grant'
     seen: [], // every request the stub was asked for, fulfilled or not
     calls: [], // every request it actually answered: `${method} ${path}`
@@ -137,7 +141,7 @@ function answer(world, method, path, search, body) {
     if (!world.current) return { status: 204 }
     return {
       json: {
-        device: { ...DEVICE, volume_percent: world.volume },
+        device: { ...DEVICE, is_active: !world.asleep, volume_percent: world.volume },
         is_playing: world.playing,
         progress_ms: world.position,
         repeat_state: world.repeat,
@@ -147,7 +151,7 @@ function answer(world, method, path, search, body) {
     }
   }
   if (method === 'GET' && p === '/me/player/devices') {
-    return { json: { devices: [{ ...DEVICE, volume_percent: world.volume }] } }
+    return { json: { devices: [{ ...DEVICE, is_active: !!world.current && !world.asleep, volume_percent: world.volume }] } }
   }
   if (method === 'GET' && p === '/me/player/queue') {
     return {
@@ -169,7 +173,7 @@ function answer(world, method, path, search, body) {
       world.queue = []
       world.context = uris.map(idFromUri)
     }
-    world.playing = !world.deaf
+    world.playing = !world.deaf && !world.asleep
     return { status: 204 }
   }
   if (method === 'PUT' && p === '/me/player/pause') {
@@ -206,7 +210,13 @@ function answer(world, method, path, search, body) {
     world.volume = Number(search.get('volume_percent'))
     return { status: 204 }
   }
-  if (method === 'PUT' && p === '/me/player') return { status: 204 } // transfer
+  if (method === 'PUT' && p === '/me/player') {
+    // A transfer brings the device forward: an idle one wakes up, and what it
+    // had loaded starts if asked to (`play: true`) — or on the next `play`.
+    world.asleep = false
+    if (body && body.play && world.current && !world.deaf) world.playing = true
+    return { status: 204 }
+  }
   if (method === 'PUT' && p === '/me/player/seek') {
     world.position = Number(search.get('position_ms')) || 0
     return { status: 204 }
@@ -835,7 +845,7 @@ export default async function run() {
       check('the walk was picked up once, past everything that had played',
         step1 === step0 + behind + 1, `#${step0} → #${step1}, ${behind} had been queued`)
       check('the play was repeated once and no more', plays === 2, `${plays} play command(s)`)
-      check('then the radio stopped and named the device', /did not start playing/.test(notice) && /press ▶/.test(notice), notice)
+      check('then the radio stopped and named the device', /did not start playing/.test(notice) && /▶/.test(notice), notice)
       check('the play button is offered', await ui.paused(page))
       await context.close()
     }
@@ -859,6 +869,64 @@ export default async function run() {
       check('the walk did not move', (await ui.step(page)) === step0)
       check('nothing about a stream running out was said', !/ran out|stopped/.test(await ui.notice(page)),
         await ui.notice(page))
+      await context.close()
+    }
+
+    /* 21 — a cold start on the Spotify desktop left idle: the screenshot */
+    if (want(21)) {
+      console.log('\n21 · ▶ with Spotify open and idle on the desktop')
+      const world = makeWorld(startId)
+      // Nothing on air, nothing loaded; the desktop is listed but not active,
+      // and a `play` addressed to it loads the track without playing it.
+      world.current = null
+      world.playing = false
+      world.asleep = true
+      const { context, page } = await openRadio(browser, world, { startId })
+      await sleep(3000) // the adopt has looked and found nothing on air
+      await page.locator('.ctl.main[title="Play"]').click()
+      await sleep(5000)
+      const plays = world.calls.filter((c) => c.includes('[restart]'))
+      const i = world.calls.findIndex((c) => c.includes('[restart]'))
+      check('the music started', world.playing === true && world.current !== null,
+        `playing=${world.playing} current=${world.current}`)
+      check('with one play, not a retry', plays.length === 1, `${plays.length} play command(s)`)
+      check('the device was brought forward before it', world.calls.slice(0, i).includes('PUT /me/player'),
+        world.calls.slice(Math.max(0, i - 3), i + 1).join(' → '))
+      check('nothing was said about a device not starting', !/did not start/.test(await ui.notice(page)),
+        await ui.notice(page))
+      await context.close()
+    }
+
+    /* 22 — a cold start on a device that takes every command and plays nothing */
+    if (want(22)) {
+      console.log('\n22 · ▶ on a device that accepts the play and never performs it')
+      const world = makeWorld(startId)
+      world.current = null
+      world.playing = false
+      world.deaf = true
+      const { context, page } = await openRadio(browser, world, { startId })
+      await sleep(3000)
+      const step0 = await ui.step(page)
+      await page.locator('.ctl.main[title="Play"]').click()
+      await page.waitForFunction(
+        () => /▶/.test((document.querySelector('.notice') || {}).textContent || ''),
+        null,
+        { timeout: 45000 }
+      ).catch(() => {})
+      const plays = world.calls.filter((c) => c.includes('[restart]')).length
+      const transfers = world.calls.filter((c) => c === 'PUT /me/player').length
+      const notice = await ui.notice(page)
+      check('the play was sent twice and no more', plays === 2, `${plays} play command(s)`)
+      check('the second time the device was brought forward first', transfers >= 2, `${transfers} transfer(s)`)
+      check('then the radio stopped, named the device and said what to do',
+        /did not start playing/.test(notice) && /press play once in Spotify/.test(notice) && /▶/.test(notice), notice)
+      check('the play button is offered', await ui.paused(page))
+      check('the walk did not move', (await ui.step(page)) === step0)
+      // No loop: nothing more goes out once it has said its piece.
+      const before = world.calls.length
+      await sleep(8000)
+      const sent = world.calls.slice(before).filter((c) => !c.startsWith('GET'))
+      check('and nothing more was sent', sent.length === 0, sent.join(', '))
       await context.close()
     }
 

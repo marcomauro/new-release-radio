@@ -281,11 +281,17 @@ export function createConnectProvider() {
       return ref && ref.startsWith('spotify:track:') ? ref.slice('spotify:track:'.length) : null
     },
 
-    async start(track) {
+    /**
+     * Start a track. `wake` brings the device forward with a transfer before the
+     * `play`, and skips the resume shortcut: it is asked for when the last
+     * command was accepted and produced nothing, so "already on air" is
+     * exactly what cannot be trusted.
+     */
+    async start(track, { wake = false } = {}) {
       const uri = refOf(track)
       if (!uri) return failed('http', 'not a playable track')
       // Already on air: joining a running session must not restart it.
-      if (uri === lastRef && started) {
+      if (uri === lastRef && started && !wake) {
         try {
           await api.resume()
           clearTransient()
@@ -297,6 +303,17 @@ export function createConnectProvider() {
         }
       }
       await ensureDevice()
+      // A device that is not the active one — the desktop left idle, a speaker
+      // asleep — is known to take a `play` addressed to it and do nothing with
+      // it. Bringing it forward first is what the Spotify app itself does. The
+      // transfer's own failure is not the answer; the `play` after it is.
+      if (device && (wake || !device.active)) {
+        try {
+          await api.transfer(device.id, false)
+        } catch (e) {
+          if (api.isNetworkError(e)) return fail(e)
+        }
+      }
       try {
         await api.play([uri], device ? device.id : undefined)
         started = true
