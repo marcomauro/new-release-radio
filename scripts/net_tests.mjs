@@ -708,7 +708,10 @@ export default async function run() {
       const depth0 = world.queue.length
       const step0 = await ui.step(page)
       const onAir = world.current
-      check('the platform is holding more than one track', depth0 >= 2, `${depth0} queued`)
+      // On screen and online the footprint in the shared queue is one track:
+      // the platform's queue is the user's too, and nothing put there can be
+      // taken back.
+      check('the platform is holding exactly one track of ours', depth0 === 1, `${depth0} queued`)
 
       await page.locator('.ctl[title^="Next"]').click()
       await sleep(4000)
@@ -716,7 +719,7 @@ export default async function run() {
       check('it played what we had queued', world.current !== world.context[0])
       check('the walk advanced by one', (await ui.step(page)) === step0 + 1,
         `#${step0} → #${await ui.step(page)}`)
-      check('the queue was refilled at once', world.queue.length >= depth0 - 1,
+      check('the queue was refilled at once', world.queue.length === depth0,
         `${depth0} → ${world.queue.length}`)
       check('nothing was restarted', !world.calls.some((c) => c.includes('[restart]')))
       await context.close()
@@ -730,6 +733,7 @@ export default async function run() {
       await settle(page, world)
       await sleep(2500)
       const first = world.context[0]
+      const step0 = await ui.step(page)
       const seen = []
       for (let i = 0; i < 3; i++) {
         // eslint-disable-next-line no-await-in-loop
@@ -742,9 +746,44 @@ export default async function run() {
       check('three different tracks played', new Set(seen).size === 3, seen.join(', '))
       check('it never fell back to the first track of the session',
         !seen.includes(first), `first=${first}`)
+      check('the walk advanced by three', (await ui.step(page)) === step0 + 3,
+        `#${step0} → #${await ui.step(page)}`)
       check('the platform still holds something of ours', world.queue.length >= 1,
         `${world.queue.length} queued`)
-      check('and nothing was restarted', !world.calls.some((c) => c.includes('[restart]')))
+      // With one track queued, each skip is a `next` followed by a refill; a
+      // skip that lands before the refill is a `play` of the right track, which
+      // is correct — but two seconds apart the refill has always landed.
+      check('and each skip was a `next`, not a restart', !world.calls.some((c) => c.includes('[restart]')),
+        world.calls.filter((c) => c.includes('player/play') || c.includes('player/next')).join(', '))
+      await context.close()
+    }
+
+    /* 23 — two skips faster than a refill: a `play` of the right track, never a fallback */
+    if (want(23)) {
+      console.log('\n23 · two skips faster than the queue can be refilled')
+      const world = makeWorld(startId)
+      const { context, page } = await openRadio(browser, world, { startId })
+      await settle(page, world)
+      await sleep(2500)
+      const first = world.context[0]
+      const step0 = await ui.step(page)
+      const btn = page.locator('.ctl[title^="Next"]')
+      await btn.click()
+      await sleep(150)
+      await btn.click()
+      await sleep(4000)
+      check('it never fell back to the first track of the session', world.current !== first,
+        `current=${world.current} first=${first}`)
+      check('the track on air is the walk\'s current track',
+        world.current === (await page.evaluate(() => {
+          const t = document.querySelector('.meta .title')
+          return t ? t.textContent : ''
+        })) || (nodeById.get(world.current) || {}).title === (await ui.title(page)),
+        `on air "${(nodeById.get(world.current) || {}).title}" · screen "${await ui.title(page)}"`)
+      check('the walk advanced by two', (await ui.step(page)) === step0 + 2,
+        `#${step0} → #${await ui.step(page)}`)
+      check('it is playing', world.playing === true)
+      check('and a track of ours is queued again', world.queue.length >= 1, `${world.queue.length} queued`)
       await context.close()
     }
 

@@ -228,14 +228,22 @@ far ahead the walk is committed**: anything already in the playlist plays even i
 the rules change or the listener skips.
 
 That commitment is exactly what a queue cannot take back — `POST
-/me/player/queue` appends, and there is no endpoint that removes — which is why
-the depth on screen used to be a single track. It is three now, because depth 1
-made the skip button wrong: `next` on a queue holding one track empties it, and
-a second skip a moment later lands in the one-track context, i.e. back at the
-first track of the session. Three is the smallest depth that survives a run of
-skips; the price is that a rule change lands three tracks later instead of one.
-The playlist is the shape that stops paying that price, because its tail can be
-rewritten.
+/me/player/queue` appends, and there is no endpoint that removes, not even the
+app's own "Clear queue" — which is why the depth on screen is a **single
+track**. The platform's queue is also the *user's* queue: whatever they add from
+the Spotify app sits in the same FIFO, and whatever we put there plays even
+after they take the wheel. One track is the smallest footprint that still gives
+the player something at the boundary.
+
+It was three for a while, because depth 1 had made the skip button wrong: `next`
+on a queue holding one track empties it, and a second skip a moment later landed
+in the one-track context, i.e. back at the first track of the session. What made
+one safe again was fixing the skip, not the depth: it checks the platform's queue
+before sending `next`, keeps its books at once, refills at once, and never sends
+`next` into an empty queue — it plays the walk's next track instead. Two skips
+faster than a refill cost a `play` rather than a `next`; nothing falls back. The
+playlist remains the shape that stops paying for depth in commitment at all,
+because its tail can be rewritten.
 
 But the commitment is **revocable**: the tail after the cursor can be removed and
 rewritten in one request. So depth costs a rewrite when the rules change, not
@@ -278,7 +286,8 @@ play during an outage, recovery after Spotify has moved on, a request that never
 answers, a token refresh that fails for want of network, a refresh token that is
 genuinely dead, a pocket plus an outage, a real `context.setOffline()`
 transition, repeat and shuffle found on and refused, skipping — once, three
-times in a row, and into a queue the platform has emptied under us — and a
+times in a row, twice faster than the queue can be refilled, and into a queue the
+platform has emptied under us — and a
 device that vanishes, one that accepts a `play` and never performs it, a pause
 followed by the device going idle, and a cold ▶ on the Spotify desktop left idle
 — which loads the track and does not play it until brought forward. It found

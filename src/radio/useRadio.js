@@ -115,24 +115,30 @@ const OFFLINE_AFTER = 3
 
 // How many decided tracks may sit in the platform's own queue.
 //
-// THREE, not one, even with the app on screen — because of skip. `next` plays
-// whatever the platform holds, and with a single track queued the first skip
-// empties the queue: a second skip a moment later finds nothing there and the
-// player falls back to its context, which is the FIRST track of the session.
-// Three means three skips in a row still land on the walk.
+// ONE with the app on screen. The platform's queue is shared with the user —
+// whatever they add from the Spotify app sits in the same FIFO, and the API
+// has no way to REMOVE a track from it (it only appends), so every track we
+// hand over is committed and plays even after they take the wheel. One track
+// is the smallest footprint that still gives the player something to play at
+// the boundary, and a rule change lands one track later instead of three.
 //
-// It is a real trade: Spotify has no way to REMOVE a track from the queue (the
-// API only appends), so everything queued is committed. Depth is therefore lag
-// — a rule change now applies three tracks later instead of one. That is the
-// price of a skip button that works, and the reason a rolling playlist (whose
-// tail CAN be rewritten) is the better shape long-term; see
-// docs/ARCHITECTURE.md, "A buffer instead of a queue".
+// This was three for a while, because of skip: `next` plays whatever the
+// platform holds, and with one track queued the first skip emptied the queue,
+// so a second skip a moment later fell back to the one-track context — the
+// FIRST track of the session. What makes one safe again is not depth but the
+// skip itself: it checks the platform's queue before sending `next`, keeps its
+// books at once, refills at once, and never sends `next` into an empty queue
+// (it plays the walk's next track instead). Two skips faster than a refill
+// cost a `play` rather than a `next`; nothing falls back. A rolling playlist,
+// whose tail CAN be rewritten, remains the shape that removes the trade
+// altogether; see docs/ARCHITECTURE.md, "A buffer instead of a queue".
 //
-// Deeper still when we cannot count on being asked again soon (hidden, or a
-// network that is dropping requests), sized by TIME rather than by count: what
-// matters is that the stream does not run out and hand the session to Spotify's
+// Deeper when we cannot count on being asked again soon (hidden, or a network
+// that is dropping requests), sized by TIME rather than by count: what matters
+// is that the stream does not run out and hand the session to Spotify's
 // autoplay, and a two-minute track buys half of what a five-minute one does.
-const QUEUE_DEPTH = { visible: 3, max: 6 }
+// The shared queue is not on the user's screen in those moments anyway.
+const QUEUE_DEPTH = { visible: 1, max: 6 }
 const HORIZON_MS = { hidden: 10 * 60 * 1000, degraded: 8 * 60 * 1000 }
 const FALLBACK_TRACK_MS = 210 * 1000
 
