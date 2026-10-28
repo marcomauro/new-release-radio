@@ -14,6 +14,8 @@
      • the cover is square and usably big;
      • it never intersects the top bar, the title, the controls or the footer;
      • it stays inside the viewport and nothing scrolls sideways;
+     • the volume never lies on top of a transport button (it was absolutely
+       positioned and slid over ⏭ on any window under ~660 px tall);
      • a click turns the sleeve, and the mark that says so is visible without a
        hover (on a desktop the flip was invisible until the mouse swept over it);
      • the panel's search field lines up with the headings above it, inside the
@@ -136,6 +138,11 @@ const geom = (page) =>
       vw: window.innerWidth, vh: window.innerHeight,
       topbar: r('.topbar'), cover: r('.cover'), slot: r('.cover-slot'),
       meta: r('.meta'), controls: r('.controls'), footer: r('.footer'),
+      volume: r('.volume'),
+      buttons: [...document.querySelectorAll('.transport .ctl')].map((e) => {
+        const b = e.getBoundingClientRect()
+        return { x: b.x, y: b.y, right: b.right, bottom: b.bottom }
+      }),
       turnOpacity: document.querySelector('.cover .turn')
         ? getComputedStyle(document.querySelector('.cover .turn')).opacity : null,
     }
@@ -154,6 +161,8 @@ const SIZES = [
   { w: 570, h: 620, name: 'desktop window, shorter' },
   { w: 700, h: 560, name: 'desktop 700×560' },
   { w: 900, h: 500, name: 'desktop 900×500' },
+  { w: 1100, h: 600, name: 'desktop 1100×600 (volume over ⏭)' },
+  { w: 768, h: 1024, name: 'tablet 768×1024' },
   { w: 1280, h: 800, name: 'desktop 1280×800' },
   { w: 1280, h: 480, name: 'desktop 1280×480 (very short)' },
   { w: 1600, h: 1000, name: 'desktop 1600×1000' },
@@ -174,6 +183,10 @@ for (const size of SIZES) {
   check(`${size.name}: cover clear of the title`, !hits(c, g.meta))
   check(`${size.name}: cover clear of the controls`, !hits(c, g.controls))
   check(`${size.name}: cover clear of the footer`, !hits(c, g.footer))
+  check(`${size.name}: the volume is there`, !!g.volume)
+  check(`${size.name}: volume clear of the transport`, !g.buttons.some((b) => hits(g.volume, b)),
+    `volume ${g.volume && `${g.volume.x}–${g.volume.right}`}`)
+  check(`${size.name}: volume clear of the footer`, !hits(g.volume, g.footer))
   check(`${size.name}: cover inside the viewport`, c.y >= -0.5 && c.bottom <= g.vh + 0.5,
     `y ${c.y} bottom ${c.bottom} vh ${g.vh}`)
   check(`${size.name}: nothing scrolls sideways`,

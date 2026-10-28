@@ -777,19 +777,28 @@ input {
   cursor: pointer;
 }
 
-/* The transport stays optically centred under the cover; the volume rides at
-   the right edge of the same column, so adding it moved nothing. */
+/* Three columns: the transport sits in the middle one, the volume in the right
+   one, and the empty left column is the same width as the right — so the
+   transport stays optically centred under the cover and adding the volume moves
+   nothing. The volume used to be absolutely positioned at the row's right edge;
+   whenever the row was narrower than ~410 px (any desktop window under ~660 px
+   tall, since the row follows --cover) it slid on top of the next button.
+   A grid cell cannot overlap its neighbour, and the container query below puts
+   the volume on a row of its own when the three columns do not fit. */
 .controls {
-  position: relative;
   width: min(var(--cover), 100%);
   max-width: 100%;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: center;
+  column-gap: 12px;
+  row-gap: 10px;
   flex: 0 0 auto;
+  container-type: inline-size;
 }
 
 .transport {
+  grid-column: 2;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -797,8 +806,8 @@ input {
 }
 
 .volume {
-  position: absolute;
-  right: 0;
+  grid-column: 3;
+  justify-self: end;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -893,6 +902,21 @@ input {
   border: 0;
   border-radius: 50%;
   background: var(--genre);
+}
+
+/* Not enough room for transport + volume side by side (transport 202 px, the
+   volume 92 px, mirrored on the left to keep the centre, plus the gaps): the
+   volume takes a centred row under the transport, with a slider worth dragging.
+   Touch sizes need more — see the touch block. */
+@container (max-width: 409px) {
+  .volume {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: center;
+  }
+  .volume input[type='range'] {
+    width: 140px;
+  }
 }
 
 .ctl {
@@ -1224,9 +1248,6 @@ input {
   .transport {
     gap: 22px;
   }
-  .volume input[type='range'] {
-    width: 44px;
-  }
 }
 
 /* Phones. Three chips cannot share a 360 CSS px row with the name, so the top
@@ -1294,11 +1315,6 @@ input {
   }
 }
 
-/* Phone, portrait: a 74 px volume control cannot share a 315 px row with the
-   transport — squeezing it there put the slider under the next button. It gets
-   its own centred row instead, and becomes properly usable rather than a stub.
-   (Earlier this control was simply hidden below 380 px, which left a lone
-   speaker icon that read as a broken button.) */
 /* Touch: nothing you have to aim at should be 22 px tall.
    The volume only renders here when the audio is NOT coming out of the handset
    (see Controls.jsx / App.jsx) — a phone refuses the remote command and its own
@@ -1319,6 +1335,26 @@ input {
   }
   .sleeve .out {
     min-height: 40px;
+  }
+  .ctl {
+    width: 48px;
+    height: 48px;
+  }
+  .ctl.main {
+    width: 60px;
+    height: 60px;
+  }
+  /* Same rule as on desktop, with the finger-sized transport (216 px) and
+     volume (104 px). */
+  @container (max-width: 449px) {
+    .volume {
+      grid-column: 1 / -1;
+      grid-row: 2;
+      justify-self: center;
+    }
+    .volume input[type='range'] {
+      width: 140px;
+    }
   }
   .volume .spk {
     width: 34px;
@@ -1355,22 +1391,12 @@ input {
 }
 
 /* Phone, portrait, WITH a volume control (so: playing to a speaker or a
-   computer). A 74 px control cannot share a 315 px row with the transport, so it
-   takes a row of its own — and the cover gives back the height that row costs.
-   `:has` scopes this to the case where the control actually rendered; without
-   it the layout is simply the one-row version. */
+   computer). The controls' container query stacks the volume under the
+   transport; the cover gives back the height that row costs. `:has` scopes this
+   to the case where the control actually rendered. */
 @media (max-width: 480px) and (orientation: portrait) {
-  .controls.with-volume {
-    flex-direction: column;
-    gap: 12px;
-  }
   .controls.with-volume .volume {
-    position: static;
-    justify-content: center;
     opacity: 0.85;
-  }
-  .controls.with-volume .volume input[type='range'] {
-    width: 128px;
   }
   .screen:has(.controls.with-volume) {
     --cover: min(42vh, 340px);
@@ -1432,10 +1458,15 @@ input {
   .controls {
     grid-area: controls;
     width: auto;
+    grid-template-columns: auto minmax(0, 1fr);
   }
   .transport {
+    grid-column: 1;
     justify-content: flex-start;
     gap: 20px;
+  }
+  .volume {
+    grid-column: 2;
   }
   .notice {
     padding-bottom: 2px;
