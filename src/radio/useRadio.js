@@ -99,7 +99,7 @@ import { loadArchive } from '../core/graph.js'
 import { createStation, randomSeed } from '../core/walker.js'
 import { DEFAULT_RULESET, presetById } from '../core/rules.js'
 import { createProviders, preferredProviderId, CAPS } from '../providers/index.js'
-import { makeSnapshot, ok } from '../providers/provider.js'
+import { makeSnapshot, ok, failed } from '../providers/provider.js'
 import { completeLoginIfNeeded, isLoggedIn } from '../providers/spotify/auth.js'
 import { prefetchCovers } from '../providers/spotify/artwork.js'
 
@@ -414,6 +414,10 @@ export function useRadio() {
   useEffect(() => {
     if (!provider) return
     let alive = true
+    // A player that cannot play part of the archive (YouTube has no video for
+    // some tracks) narrows the walk itself, so the radio never lands on silence.
+    const st = stationRef.current
+    if (st) st.setPlayable(provider.playable ? (n) => provider.playable(n) : null)
     provider.init().then(() => {
       if (!alive) return
       if (provider.caps.has(CAPS.OUTPUTS) && provider.outputs) {
@@ -609,6 +613,20 @@ export function useRadio() {
   }, [canQueue, provider, station, targetDepth, reconcileQueue])
 
   /**
+   * The platform took our `play` and nothing came of it, twice — or refused it
+   * outright. Stop, and say why: a radio that keeps sending commands into
+   * silence is worse than one that asks to be started again.
+   */
+  const giveUp = useCallback(
+    (why) => {
+      recovery.current = { pending: false, since: 0, tries: 0 }
+      setWantsPlay(false)
+      setNotice(why)
+    },
+    []
+  )
+
+  /**
    * Start the walk's current track on the platform. `wake` asks the provider to
    * bring the device forward first (a transfer) — for a device that took the
    * last `play` and did nothing with it.
@@ -617,6 +635,18 @@ export function useRadio() {
     async ({ wake = false } = {}) => {
       if (!provider || !station || !station.current) return
       pausedByUs.current = false
+      if (provider.playable && !provider.playable(station.current)) {
+        // The walk was decided before this player was chosen, or the track was
+        // picked by hand: move on to the first one it can play, and say so.
+        if (!archive || !archive.index.nodes.some((n) => provider.playable(n))) {
+          giveUp(`none of the archive can play on ${provider.label} yet — choose another player`)
+          rerender()
+          return failed('http', 'nothing playable')
+        }
+        const missing = station.current
+        for (let i = 0; i < 50 && !provider.playable(station.current); i++) station.advance()
+        flash(`“${missing.title}” is not on ${provider.label} — the walk moves on`)
+      }
       const ref = await provider.resolve(station.current)
       expectedRef.current = ref
       // `play(uri)` replaces the platform's context: whatever we had queued is gone.
@@ -638,21 +668,7 @@ export function useRadio() {
       rerender()
       return r || ok()
     },
-    [provider, station, topUpQueue, rerender, flash]
-  )
-
-  /**
-   * The platform took our `play` and nothing came of it, twice — or refused it
-   * outright. Stop, and say why: a radio that keeps sending commands into
-   * silence is worse than one that asks to be started again.
-   */
-  const giveUp = useCallback(
-    (why) => {
-      recovery.current = { pending: false, since: 0, tries: 0 }
-      setWantsPlay(false)
-      setNotice(why)
-    },
-    []
+    [provider, station, archive, topUpQueue, rerender, flash, giveUp]
   )
 
   // advance the walk without touching the platform (it already moved on)
@@ -962,6 +978,7 @@ export function useRadio() {
             await topUpQueue()
           }
         } else if (snap.endedRef && snap.endedRef === expectedRef.current) {
+          if (snap.skipped) flash(snap.skipped)
           station.advance()
           await startCurrent()
         }
@@ -1319,7 +1336,7 @@ export function useRadio() {
   // Logged in but listening to previews: say it once, quietly, instead of
   // silently serving 30-second clips to someone with a Premium session.
   const hint =
-    !canQueue && isLoggedIn() && provider && provider.id !== 'spotify-connect'
+    !canQueue && isLoggedIn() && provider && !provider.caps.has(CAPS.FULL)
       ? 'Spotify is connected — switch the player to Connect for full tracks'
       : ''
 

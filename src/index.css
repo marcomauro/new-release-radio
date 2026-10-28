@@ -57,7 +57,12 @@ input {
      the fallback for browsers without it. */
   height: 100%;
   height: 100dvh;
-  overflow: hidden; /* the ambient layer is deliberately oversized */
+  /* The ambient layer is deliberately oversized. `hidden` alone still leaves a
+     scroll container that script can scroll — and the YouTube player does, from
+     inside its iframe, sliding the whole screen up by the ambient's overhang.
+     `clip` cannot be scrolled at all; `hidden` stays for older engines. */
+  overflow: hidden;
+  overflow: clip;
   display: flex;
   flex-direction: column;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
@@ -438,6 +443,27 @@ input {
 .cover.idle {
   transform: scale(0.985);
   opacity: 0.85;
+}
+
+/* YouTube plays in the cover's place: the video must be seen whole, with
+   nothing over it, so it is never dimmed while paused. */
+.cover.video,
+.cover.video.idle {
+  opacity: 1;
+}
+
+.cover .video-host {
+  position: absolute;
+  inset: 0;
+  background: #000;
+}
+
+.cover .video-host > *,
+.cover .video-host iframe {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  border: 0;
 }
 
 /* Placeholder while the cover resolves: the genre colour and the initials. */

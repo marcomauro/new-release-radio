@@ -10,13 +10,14 @@
 import { createConnectProvider } from './spotify/connect.js'
 import { createEmbedProvider } from './spotify/embed.js'
 import { createSimulatedProvider } from './simulated.js'
+import { createYouTubeProvider } from './youtube.js'
 import { isLoggedIn } from './spotify/auth.js'
 
 export { CAPS } from './provider.js'
 
 /** Instantiate every provider once, in preference order. */
 export function createProviders() {
-  return [createConnectProvider(), createEmbedProvider(), createSimulatedProvider()]
+  return [createConnectProvider(), createYouTubeProvider(), createEmbedProvider(), createSimulatedProvider()]
 }
 
 /**

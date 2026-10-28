@@ -19,7 +19,8 @@ player, and the player change without touching the rules.
  ┌───────────┴───────────────────┐   ┌──────────────┴──────────────────┐
  │ core/                          │   │ providers/                      │
  │   graph.js   archive + index    │   │   spotify/connect  (full+queue) │
- │   rules.js   constraints/scorers│   │   spotify/embed    (preview)    │
+ │   rules.js   constraints/scorers│   │   youtube          (full, video)│
+ │                                 │   │   spotify/embed    (preview)    │
  │   walker.js  the endless walk   │   │   simulated        (silent)     │
  │                                 │   │                                 │
  │  pure, synchronous, testable in  │   │  async, all failures contained  │

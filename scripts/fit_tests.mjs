@@ -36,6 +36,7 @@ import { spawn } from 'node:child_process'
 
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { routeYouTube } from './yt_stub.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const BASE = '/new-release-radio/'
@@ -84,16 +85,20 @@ const check = (name, pass, detail = '') => {
 }
 
 const queue = []
-async function open(size) {
+async function open(size, { player = null } = {}) {
   const touch = size.touch ?? size.w < 900
   const context = await browser.newContext({
     viewport: { width: size.w, height: size.h }, deviceScaleFactor: 1, hasTouch: touch, isMobile: touch,
   })
   const page = await context.newPage()
-  await page.addInitScript(`
+  // YouTube needs no login: the pass for it runs signed out, as most listeners will.
+  await page.addInitScript(player === 'youtube'
+    ? `localStorage.removeItem('nrr_sp_tokens'); localStorage.removeItem('nrr_session_v1')`
+    : `
     localStorage.setItem('nrr_sp_tokens', JSON.stringify({
       access_token:'t', refresh_token:'r', expires_at: Date.now()+3600000, scope:''}))
     localStorage.removeItem('nrr_session_v1')`)
+  if (player === 'youtube') await routeYouTube(page, { durationSec: 600 })
   await page.route('**://marcomauro.github.io/**', (r) =>
     r.fulfill({ contentType: 'application/json', body: JSON.stringify(graph) }))
   await page.route('**://open.spotify.com/**', (r) =>
@@ -119,7 +124,7 @@ async function open(size) {
         tracks: (u.searchParams.get('ids') || '').split(',').filter(Boolean).map(item) }) })
     return route.fulfill({ status: 204, body: '' })
   })
-  await page.goto(`${ORIGIN}${BASE}?track=${START}`, { waitUntil: 'domcontentloaded' })
+  await page.goto(`${ORIGIN}${BASE}?track=${START}${player ? `&player=${player}` : ''}`, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('.meta .title', { timeout: 15000 })
   await sleep(1800)
   return { context, page }
@@ -264,6 +269,51 @@ for (const size of SIZES) {
   await page.locator('.panel .head .chip').last().click()
   await sleep(300)
   if (OUT) await page.screenshot({ path: `${OUT}/fit-${size.w}x${size.h}.png` })
+  await context.close()
+}
+
+// YouTube: the video takes the cover's place, so the cover's invariants are
+// the video's — plus the iframe filling the square, and YouTube's own minimum
+// of 200×200 wherever the window leaves room for it. On a phone the volume is
+// not offered (a phone sets its own), as with every player that plays in the
+// page; on a desktop it is.
+console.log('\n— YouTube player —')
+for (const size of SIZES) {
+  const touch = size.touch ?? size.w < 900
+  const { context, page } = await open(size, { player: 'youtube' })
+  await page.locator('.bigplay').click()
+  await sleep(1200)
+  const g = await geom(page)
+  const c = g.cover
+  const v = await page.evaluate(() => {
+    const f = document.querySelector('.cover .video-host iframe')
+    if (!f) return null
+    const b = f.getBoundingClientRect()
+    return { w: +b.width.toFixed(1), h: +b.height.toFixed(1) }
+  })
+  console.log(`${size.name} — video ${v ? `${v.w}×${v.h}` : 'missing'}`)
+  const n = `youtube ${size.name}`
+  check(`${n}: the video is in the cover`, !!v)
+  check(`${n}: the video fills the square`, !!v && Math.abs(v.w - c.w) <= 1 && Math.abs(v.h - c.h) <= 1,
+    v ? `${v.w}×${v.h} in ${c.w}×${c.h}` : '')
+  check(`${n}: cover is square`, Math.abs(c.w - c.h) <= 1, `${c.w}×${c.h}`)
+  check(`${n}: cover clear of the top bar`, !hits(c, g.topbar))
+  check(`${n}: cover clear of the title`, !hits(c, g.meta))
+  check(`${n}: cover clear of the controls`, !hits(c, g.controls))
+  check(`${n}: cover clear of the footer`, !hits(c, g.footer))
+  check(`${n}: cover inside the viewport`, c.y >= -0.5 && c.bottom <= g.vh + 0.5)
+  check(`${n}: the video is at least 200×200 where the window allows`,
+    c.w >= 199.5 || g.slot.h < 200 || g.slot.w < 200, `${c.w}px in a ${g.slot.w}×${g.slot.h} slot`)
+  if (touch) check(`${n}: no volume on a touch screen`, !g.volume)
+  else check(`${n}: the volume is there and clear of the transport`,
+    !!g.volume && !g.buttons.some((b) => hits(g.volume, b)))
+  check(`${n}: no top bar label is clipped`, g.clipped.length === 0, g.clipped.join(' | '))
+  check(`${n}: the top bar fits the window`, !g.topbarOverflow)
+  check(`${n}: nothing scrolls sideways`,
+    await page.evaluate(() => document.body.scrollWidth <= window.innerWidth + 0.5))
+  check(`${n}: nothing is laid over the playing video`,
+    await page.evaluate(() => !document.querySelector('.cover .veil, .cover .turn')))
+  if (OUT) await page.screenshot({ path: `${OUT}/fit-youtube-${size.w}x${size.h}.png` })
   await context.close()
 }
 
