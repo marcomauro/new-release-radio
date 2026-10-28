@@ -10,7 +10,7 @@
    is logged in `window.__ytStub.calls`, which is what the assertions read.
 
    Configure it before the page loads, with `window.__ytConfig`:
-     { durationSec, refuse: { videoId: errorCode }, blockAutoplay }
+     { durationSec, refuse: { videoId: errorCode }, blockAutoplay, startDelayMs }
    and `window.__ytStub.tap()` is a tap on the video itself.
    -------------------------------------------------------------------------- */
 
@@ -24,6 +24,7 @@ export const YT_API_SCRIPT = `
     durationSec: cfg.durationSec || 4,
     refuse: cfg.refuse || {},
     blockAutoplay: !!cfg.blockAutoplay,
+    startDelayMs: cfg.startDelayMs || 0,
     tapped: false,
     tap: function () {
       S.tapped = true
@@ -78,6 +79,12 @@ export const YT_API_SCRIPT = `
       return
     }
     if (S.blockAutoplay && !S.tapped) { this._emit(-1); return }
+    if (S.startDelayMs) {
+      // YouTube taking its time: "unstarted", then playing, with no help.
+      this._emit(-1)
+      this._wait = setTimeout(function () { if (self._vid === id) self._play() }, S.startDelayMs)
+      return
+    }
     this._play()
   }
   Player.prototype.playVideo = function () {

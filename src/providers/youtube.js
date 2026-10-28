@@ -26,7 +26,8 @@
    **Phones.** A mobile browser can refuse to start sound that a tap did not
    start, and a tap on OUR ▶ reaches YouTube's iframe only as a message. When a
    video sits there unstarted, the status says to tap the video itself, which
-   is always allowed. And a phone pauses a video whose page is not on screen:
+   is always allowed — worded so it also fits YouTube just being slow, which
+   from out here looks exactly the same. And a phone pauses a video whose page is not on screen:
    unlike Spotify Connect, this player does not play in the background.
    -------------------------------------------------------------------------- */
 
@@ -65,7 +66,11 @@ const PAUSED = 2
 const BUFFERING = 3
 const CUED = 5
 
-// A video loaded and still not playing after this long is waiting for a tap.
+// A video loaded and still not playing after this long gets a word on screen.
+// It cannot say WHICH of two things is happening: the iframe reports the same
+// "unstarted" for a phone waiting for a tap on the video and for YouTube simply
+// taking its time (on the live site, desktop Chrome, a video regularly took
+// 5–17 s to start). So the line says both, and blames neither.
 const TAP_HINT_MS = 4000
 
 /** onError code → why the track was skipped, as one short clause. */
@@ -185,7 +190,7 @@ export function createYouTubeProvider() {
       return {
         available: true,
         authenticated: true,
-        message: message || (waiting ? 'tap the video to start — this browser wants the first tap on it' : ''),
+        message: message || (waiting ? 'waiting for YouTube to start — if nothing happens, tap the video' : ''),
         device: null,
       }
     },

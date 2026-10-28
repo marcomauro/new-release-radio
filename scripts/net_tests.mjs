@@ -1153,6 +1153,24 @@ export default async function run() {
       await context.close()
     }
 
+    if (want('y7')) {
+      console.log('\ny7 · YouTube slow to start: the radio waits, says so, and does not move on')
+      const { context, page } = await openYouTube(browser, {
+        startId: ytStart.id,
+        yt: { startDelayMs: 9000, durationSec: 60 },
+      })
+      await page.locator('.bigplay').click()
+      await sleep(6000)
+      const notice = await ui.notice(page)
+      check('the line says it is waiting for YouTube', /waiting for YouTube/.test(notice), notice)
+      check('the walk did not move', (await ui.step(page)) === 1, `#${await ui.step(page)}`)
+      await sleep(5000)
+      check('it started by itself', !(await ui.paused(page)))
+      check('the waiting line went away', !/waiting for YouTube/.test(await ui.notice(page)), await ui.notice(page))
+      check('one video loaded, no retries', (await yt.loaded(page)).length === 1, (await yt.loaded(page)).join(','))
+      await context.close()
+    }
+
     if (want('y6')) {
       console.log('\ny6 · leaving YouTube for the previews leaves one player, not two')
       const { context, page } = await openYouTube(browser, { startId: ytStart.id, yt: { durationSec: 60 } })
