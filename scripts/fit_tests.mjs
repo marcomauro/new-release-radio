@@ -50,7 +50,7 @@ const graph = JSON.parse(readFileSync(`${root}/public/graph.json`, 'utf8'))
 const byId = new Map(graph.nodes.map((n) => [n.id, n]))
 const START = graph.nodes.find((n) => n.bpm && n.mood && n.subgenres && n.subgenres.length).id
 
-const DEVICE = { id: 'd1', is_active: true, name: "marco's iMac", type: 'Computer', volume_percent: 62, supports_volume: true }
+const DEVICE = { id: 'd1', is_active: true, name: 'Marco’s MacBook Air', type: 'Computer', volume_percent: 62, supports_volume: true }
 const item = (id) => {
   const n = byId.get(id)
   return { id, name: n.title, duration_ms: (n.duration_sec || 210) * 1000, uri: `spotify:track:${id}`,
@@ -85,7 +85,7 @@ const check = (name, pass, detail = '') => {
 
 const queue = []
 async function open(size) {
-  const touch = size.w < 900
+  const touch = size.touch ?? size.w < 900
   const context = await browser.newContext({
     viewport: { width: size.w, height: size.h }, deviceScaleFactor: 1, hasTouch: touch, isMobile: touch,
   })
@@ -139,6 +139,18 @@ const geom = (page) =>
       topbar: r('.topbar'), cover: r('.cover'), slot: r('.cover-slot'),
       meta: r('.meta'), controls: r('.controls'), footer: r('.footer'),
       volume: r('.volume'),
+      slider: r('.volume input'),
+      clipped: [...document.querySelectorAll('.topbar .chip, .topbar .wordmark')]
+        .filter((e) => e.offsetParent && e.scrollWidth > e.clientWidth + 1)
+        .map((e) => e.textContent.trim()),
+      topbarOverflow: (() => {
+        const t = document.querySelector('.topbar').getBoundingClientRect()
+        return [...document.querySelectorAll('.topbar > *')].some((e) => {
+          if (!e.offsetParent) return false
+          const b = e.getBoundingClientRect()
+          return b.right > t.right + 0.5 || b.left < t.left - 0.5
+        })
+      })(),
       buttons: [...document.querySelectorAll('.transport .ctl')].map((e) => {
         const b = e.getBoundingClientRect()
         return { x: b.x, y: b.y, right: b.right, bottom: b.bottom }
@@ -163,6 +175,9 @@ const SIZES = [
   { w: 900, h: 500, name: 'desktop 900×500' },
   { w: 1100, h: 600, name: 'desktop 1100×600 (volume over ⏭)' },
   { w: 768, h: 1024, name: 'tablet 768×1024' },
+  { w: 555, h: 370, touch: false, name: 'installed app window 555×370 (reported)' },
+  { w: 640, h: 420, touch: false, name: 'installed app window 640×420' },
+  { w: 480, h: 600, touch: false, name: 'narrow desktop window 480×600' },
   { w: 1280, h: 800, name: 'desktop 1280×800' },
   { w: 1280, h: 480, name: 'desktop 1280×480 (very short)' },
   { w: 1600, h: 1000, name: 'desktop 1600×1000' },
@@ -187,6 +202,10 @@ for (const size of SIZES) {
   check(`${size.name}: volume clear of the transport`, !g.buttons.some((b) => hits(g.volume, b)),
     `volume ${g.volume && `${g.volume.x}–${g.volume.right}`}`)
   check(`${size.name}: volume clear of the footer`, !hits(g.volume, g.footer))
+  check(`${size.name}: volume slider inside the window`,
+    !!g.slider && g.slider.x >= 0 && g.slider.right <= g.vw + 0.5, `slider ${g.slider && `${g.slider.x}–${g.slider.right}`} vw ${g.vw}`)
+  check(`${size.name}: no top bar label is clipped`, g.clipped.length === 0, g.clipped.join(' | '))
+  check(`${size.name}: the top bar fits the window`, !g.topbarOverflow)
   check(`${size.name}: cover inside the viewport`, c.y >= -0.5 && c.bottom <= g.vh + 0.5,
     `y ${c.y} bottom ${c.bottom} vh ${g.vh}`)
   check(`${size.name}: nothing scrolls sideways`,
