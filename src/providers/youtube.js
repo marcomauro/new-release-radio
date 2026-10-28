@@ -28,7 +28,9 @@
    video sits there unstarted, the status says to tap the video itself, which
    is always allowed — worded so it also fits YouTube just being slow, which
    from out here looks exactly the same. And a phone pauses a video whose page is not on screen:
-   unlike Spotify Connect, this player does not play in the background.
+   unlike Spotify Connect, this player does not play in the background. The
+   engine copes with that for every provider without QUEUE (radio/useRadio.js):
+   it keeps the screen awake while something plays, and resumes on return.
    -------------------------------------------------------------------------- */
 
 import { CAPS, makeSnapshot, ok, failed } from './provider.js'

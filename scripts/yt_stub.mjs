@@ -11,7 +11,8 @@
 
    Configure it before the page loads, with `window.__ytConfig`:
      { durationSec, refuse: { videoId: errorCode }, blockAutoplay, startDelayMs }
-   and `window.__ytStub.tap()` is a tap on the video itself.
+   and `window.__ytStub.tap()` is a tap on the video itself;
+   `window.__ytStub.background()` is the phone pausing it as the screen locks.
    -------------------------------------------------------------------------- */
 
 export const YT_API_SCRIPT = `
@@ -29,6 +30,16 @@ export const YT_API_SCRIPT = `
     tap: function () {
       S.tapped = true
       S.players.forEach(function (p) { if (p._vid) p._play() })
+    },
+    // what a phone does to a video whose page leaves the screen: it pauses it,
+    // and nobody called pauseVideo()
+    background: function () {
+      S.players.forEach(function (p) {
+        if (p._state !== 1) return
+        p._pos = p.getCurrentTime()
+        p._stop()
+        p._emit(2)
+      })
     },
   })
   function Player(el, opts) {

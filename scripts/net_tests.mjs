@@ -1171,6 +1171,67 @@ export default async function run() {
       await context.close()
     }
 
+    if (want('y8')) {
+      console.log('\ny8 · YouTube and a locked phone: the screen is kept on, and a lock is picked up from')
+      const { context, page } = await openYouTube(browser, { startId: ytStart.id, yt: { durationSec: 60 } })
+      // a fake Screen Wake Lock that records what the radio holds
+      await page.evaluate(() => {
+        const W = (window.__wl = { held: 0, requests: 0 })
+        Object.defineProperty(navigator, 'wakeLock', {
+          configurable: true,
+          value: {
+            request: async () => {
+              W.requests++
+              W.held++
+              const s = new EventTarget()
+              let gone = false
+              s.release = async () => {
+                if (gone) return
+                gone = true
+                W.held--
+                s.dispatchEvent(new Event('release'))
+              }
+              W.last = s
+              return s
+            },
+          },
+        })
+      })
+      const setHidden = (hidden) =>
+        page.evaluate((h) => {
+          Object.defineProperty(document, 'hidden', { configurable: true, get: () => h })
+          Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (h ? 'hidden' : 'visible') })
+          if (h && window.__wl.last) window.__wl.last.release() // the browser drops the lock on hide
+          document.dispatchEvent(new Event('visibilitychange'))
+        }, hidden)
+      await page.locator('.bigplay').click()
+      await sleep(1500)
+      check('the screen is kept on while it plays', (await page.evaluate(() => window.__wl.held)) === 1)
+      const step0 = await ui.step(page)
+      await setHidden(true)
+      await page.evaluate(() => window.__ytStub.background())
+      await sleep(800)
+      await setHidden(false)
+      await sleep(1500)
+      const calls = await yt.calls(page)
+      check('back on screen, the video resumed by itself', calls.includes('play') && !(await ui.paused(page)), calls.join(', '))
+      check('without reloading or moving the walk',
+        calls.filter((c) => c.startsWith('load ')).length === 1 && (await ui.step(page)) === step0, calls.join(', '))
+      check('and said why', /screen is off/.test(await ui.notice(page)), await ui.notice(page))
+      check('the screen lock is held again', (await page.evaluate(() => window.__wl.held)) === 1)
+
+      // a pause the listener pressed survives a lock
+      await page.locator('.ctl.main[title="Pause"]').click()
+      await sleep(700)
+      check('paused, the screen may sleep', (await page.evaluate(() => window.__wl.held)) === 0)
+      await setHidden(true)
+      await sleep(500)
+      await setHidden(false)
+      await sleep(1200)
+      check('a pause pressed before the lock stays a pause', await ui.paused(page))
+      await context.close()
+    }
+
     if (want('y6')) {
       console.log('\ny6 · leaving YouTube for the previews leaves one player, not two')
       const { context, page } = await openYouTube(browser, { startId: ytStart.id, yt: { durationSec: 60 } })

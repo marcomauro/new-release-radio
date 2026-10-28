@@ -122,7 +122,11 @@ disabled embedding, is passed over and the notice line says which and why.
 YouTube's terms want the video seen, so it is the one player that is not caged:
 it plays in the cover's square, with nothing laid over it. Two limits come with
 it on a phone: a browser may want the first tap on the video itself (the
-radio says so), and a video does not play while the app is in the background.
+radio says so), and a video does not play while the app is in the background
+or the screen is locked — YouTube pauses it, and its terms want it seen. So
+while it plays the radio keeps the screen on (Screen Wake Lock), and after a
+lock you pressed yourself it picks up where it stopped as soon as you are back.
+To listen with the phone in your pocket, use Spotify Connect.
 Pick it in the panel, or open `?player=youtube`.
 
 **Spotify Connect is the real radio.** Playback is started once on the seed

@@ -302,6 +302,7 @@ export function useRadio() {
   const busySince = useRef(0)
   const lastAuditAt = useRef(0)
   const pausedByUs = useRef(false) // we asked for the pause, so do not undo it
+  const playingWhenHidden = useRef(false) // the page left the screen mid-track
   const hasPlayed = useRef(false) // the platform has actually played at least once
   const lastRecoveryAt = useRef(0)
   // The last answer that named a track: { ref, position, duration, playing, at }.
@@ -1034,6 +1035,61 @@ export function useRadio() {
     document.addEventListener('visibilitychange', onVisibility)
     return () => document.removeEventListener('visibilitychange', onVisibility)
   }, [phase, canQueue, wantsPlay, topUpQueue])
+
+  // Without QUEUE the page IS the radio: the next track starts only from this
+  // tab, and a phone freezes a hidden tab's timers — and pauses a YouTube video
+  // whose page is not on screen, which is YouTube's rule and not ours to bend.
+  // So: (1) while something plays, hold a screen wake lock, so the phone's own
+  // auto-lock does not end the stream after thirty seconds; (2) when the page
+  // comes back after a lock the user pressed, pick up where it stopped — that
+  // pause was the phone's, not the listener's. The lock is released by the
+  // browser whenever the page is hidden, so it is taken again on every return.
+  const playingNow = !!snapshot.playing
+  useEffect(() => {
+    if (phase !== 'ready' || canQueue || !wantsPlay || typeof document === 'undefined') return
+    const wl = typeof navigator !== 'undefined' ? navigator.wakeLock : null
+    let sentinel = null
+    let alive = true
+    const acquire = async () => {
+      if (!wl || !playingNow || document.hidden || sentinel) return
+      try {
+        const s = await wl.request('screen')
+        if (!alive) return s.release().catch(() => {})
+        sentinel = s
+        s.addEventListener('release', () => {
+          if (sentinel === s) sentinel = null
+        })
+      } catch (e) {
+        // refused (battery saver, an iframe without permission): nothing to do
+      }
+    }
+    acquire()
+
+    const onVisibility = async () => {
+      if (document.hidden) {
+        playingWhenHidden.current = !!snapRef.current.playing && !pausedByUs.current
+        return
+      }
+      if (!playingWhenHidden.current) return acquire()
+      playingWhenHidden.current = false
+      const before = expectedRef.current
+      if (tickRef.current) await tickRef.current() // a track that ended while away moves on here
+      if (!alive) return
+      const moved = expectedRef.current !== before // the next track was just started
+      if (!moved && !snapRef.current.playing && !pausedByUs.current && provider) {
+        await provider.resume()
+        flash(`${provider.label} stops while the screen is off — picked up again. For a locked phone, use Spotify Connect`, 9000)
+      }
+      acquire()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      alive = false
+      document.removeEventListener('visibilitychange', onVisibility)
+      if (sentinel) sentinel.release().catch(() => {})
+      sentinel = null
+    }
+  }, [phase, canQueue, wantsPlay, playingNow, provider, flash])
 
   // The browser knows about the network before we do. `online` is only a hint —
   // it means "there is an interface", not "Spotify answers" — so it downgrades
