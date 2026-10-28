@@ -206,12 +206,26 @@ export const queueState = () =>
 export const transfer = (deviceId, play = true) =>
   call('/me/player', { method: 'PUT', body: { device_ids: [deviceId], play }, policy: 'write' })
 
-export const play = (uris, deviceId) =>
+/**
+ * Play `contextUri` (an album, a playlist) starting from the track `offsetUri`.
+ *
+ * Never a bare `uris` list: since October 2026 Spotify acks that with a 204
+ * and the clients — the macOS app, the phone — load nothing. They sit
+ * "active" with no track and every action disallowed: the radio is silent.
+ * A context starts at once.
+ */
+export const playContext = (contextUri, offsetUri, deviceId) =>
   call('/me/player/play' + (deviceId ? `?device_id=${deviceId}` : ''), {
     method: 'PUT',
-    body: { uris, offset: { position: 0 } },
+    body: { context_uri: contextUri, offset: { uri: offsetUri } },
     policy: 'unsafe', // a repeat restarts the track
   })
+
+/**
+ * The track as this account's market sees it: `uri` is the version that plays
+ * here (relinked when the catalogue swapped it), `album.uri` its album.
+ */
+export const track = (id) => call(`/tracks/${encodeURIComponent(id)}?market=from_token`)
 
 export const pause = () => call('/me/player/pause', { method: 'PUT', policy: 'write' })
 export const resume = () => call('/me/player/play', { method: 'PUT', policy: 'unsafe' })

@@ -47,8 +47,9 @@
 
    **A stream that ran out.** The queue can still empty — a phone hidden longer
    than the horizon, an outage longer than the music we had handed over. When it
-   does, the platform stops, and because the station starts a ONE-TRACK context a
-   player that falls back to its context lands on the first track of the session.
+   does, the platform falls back to the context the station started from — the
+   seed track's album — and goes on with tracks the archive does not have, or
+   stops at the album's end.
    The radio used to notice none of this: `wantsPlay` was true, the poll said
    `playing: false`, and no rule acted on it — so the music stopped and stayed
    stopped, on the first track. It now recognises the case (stopped at position
@@ -230,7 +231,7 @@ function stepsRanOut({ ref, seen, expected, aheadRefs, aheadNodes, behind }) {
   // The next track of ours is loading, not running out — the ref-change branch
   // commits it. Acting here would `play` two tracks ahead and skip one.
   if (aheadRefs.includes(shown)) return -1
-  // A track behind us: the player fell back to its one-track context, which it
+  // A track behind us: the player fell back to its start context, which it
   // does only once everything queued has played.
   if (shown !== expected) return behind + 1
   // What is shown is the track we believe on air, and it is not playing.
@@ -788,8 +789,8 @@ export function useRadio() {
 
         // Repeat or shuffle is fatal to a walk, and neither is ours: they live
         // on the user's player and survive between sessions. With repeat on, the
-        // one-track context the station started from replays the moment the
-        // queue runs out — a station that loops its own first track.
+        // context the station started from (the seed track's album) replays the
+        // moment the queue runs out — a station that loops back on itself.
         if (
           canQueue &&
           provider.enforceModes &&
@@ -815,6 +816,39 @@ export function useRadio() {
         if (canQueue) {
           const ref = snap.ref
           const seen = lastOnAir.current
+
+          // Picks the walk back up when everything we handed over has played:
+          // advances past what played while we were blind and starts the next
+          // track. False when the platform still holds something of ours, or
+          // the evidence says this is not running out.
+          const recoverRanOut = async () => {
+            const behind = queuedRefs.current.length
+            const asked = await reconcileQueue()
+            if (!asked || queuedRefs.current.length !== 0) return false
+            const aheadNodes = station.upNext(RECONCILE_WINDOW)
+            const aheadRefs = await Promise.all(aheadNodes.map((u) => provider.resolve(u.node)))
+            const steps = stepsRanOut({
+              ref,
+              seen,
+              expected: expectedRef.current,
+              aheadRefs,
+              aheadNodes,
+              behind,
+            })
+            if (steps < 0) return false
+            for (let i = 0; i < steps; i++) station.advance()
+            lastRecoveryAt.current = Date.now()
+            flash(
+              steps > 0
+                ? 'the stream ran out — picking the walk back up'
+                : 'Spotify stopped mid-track — starting it again'
+            )
+            const r = await startCurrent()
+            if (r && r.ok === false && r.kind !== 'network') {
+              giveUp(`playback did not start: ${r.message} — press ▶ to try again`)
+            }
+            return true
+          }
           if (ref) {
             lastOnAir.current = {
               ref,
@@ -851,10 +885,10 @@ export function useRadio() {
           }
 
           // **The stream ran out.** Everything we handed over has played and the
-          // platform has nothing left, so it stopped — and because the station
-          // starts a ONE-TRACK context, a player that falls back to its context
-          // lands on the first track of the session. That is what "it stopped
-          // and went back to the first track" looks like from the outside.
+          // platform has nothing left, so it stopped — at the end of the seed
+          // track's album, or back on a track of ours behind the walk. (When
+          // the album goes on instead, the ref-change branch below sees tracks
+          // outside the archive and recovers the same way.)
           //
           // This has to be decided BEFORE the ref-change branch below, or the
           // walk follows the platform onto that old track and re-anchors there:
@@ -878,34 +912,7 @@ export function useRadio() {
             Date.now() - lastRecoveryAt.current > RECOVERY_COOLDOWN_MS &&
             provider.queuedRefs
           ) {
-            const behind = queuedRefs.current.length
-            const asked = await reconcileQueue()
-            if (asked && queuedRefs.current.length === 0) {
-              const aheadNodes = station.upNext(RECONCILE_WINDOW)
-              const aheadRefs = await Promise.all(aheadNodes.map((u) => provider.resolve(u.node)))
-              const steps = stepsRanOut({
-                ref,
-                seen,
-                expected: expectedRef.current,
-                aheadRefs,
-                aheadNodes,
-                behind,
-              })
-              if (steps >= 0) {
-                for (let i = 0; i < steps; i++) station.advance()
-                lastRecoveryAt.current = Date.now()
-                flash(
-                  steps > 0
-                    ? 'the stream ran out — picking the walk back up'
-                    : 'Spotify stopped mid-track — starting it again'
-                )
-                const r = await startCurrent()
-                if (r && r.ok === false && r.kind !== 'network') {
-                  giveUp(`playback did not start: ${r.message} — press ▶ to try again`)
-                }
-                return
-              }
-            }
+            if (await recoverRanOut()) return
           }
 
           if (ref && ref !== expectedRef.current) {
@@ -934,6 +941,19 @@ export function useRadio() {
                 commitTo(node, ref)
                 flash(`Spotify moved on by itself — the walk picked it up from “${node.title}”`)
               } else {
+                // The station starts from the seed track's ALBUM (Spotify no
+                // longer plays a bare track list), so a queue that ran dry
+                // does not stop: the album goes on, with tracks the archive
+                // does not have. With nothing of ours left on the platform
+                // that is the stream running out, not somebody's choice.
+                if (
+                  hasPlayed.current &&
+                  provider.queuedRefs &&
+                  Date.now() - lastRecoveryAt.current > RECOVERY_COOLDOWN_MS &&
+                  (await recoverRanOut())
+                ) {
+                  return
+                }
                 setNotice('playing something outside the archive — the walk is paused here')
                 expectedRef.current = ref
               }

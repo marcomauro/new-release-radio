@@ -6,8 +6,9 @@
    radio — whole tracks, gapless, endless.
 
    How the endless stream works here: playback is started ONCE on the seed
-   track, and every track the walk decides is appended with
-   `POST /me/player/queue`. Spotify keeps playing without interruption, and the
+   track — played from its album, because Spotify no longer loads a bare
+   `uris` list (see api.playContext) — and every track the walk decides is
+   appended with `POST /me/player/queue`. Spotify keeps playing without interruption, and the
    radio learns what is on air by polling `/me/player`. No playlist is ever
    created, nothing is ever restarted.
 
@@ -28,6 +29,24 @@ import { coverFor } from './artwork.js'
 import { CAPS, makeSnapshot, staleSnapshot, ok, failed } from '../provider.js'
 
 const refOf = (track) => (track && track.id ? `spotify:track:${track.id}` : null)
+
+// Track uri -> { context, offset } to start it from its album: `offset` is the
+// version that plays in this market, which is the one the album lists.
+// Catalogue facts, so they are kept for the session.
+const albumStarts = new Map()
+
+async function playFromAlbum(uri, deviceId) {
+  let start = albumStarts.get(uri)
+  if (!start) {
+    const t = await api.track(uri.slice('spotify:track:'.length))
+    if (!t || !t.album || !t.album.uri) {
+      throw { kind: api.HTTP, status: 404, reason: 'NO_ALBUM', message: 'track has no album to play it from' }
+    }
+    start = { context: t.album.uri, offset: t.uri || uri }
+    albumStarts.set(uri, start)
+  }
+  await api.playContext(start.context, start.offset, deviceId)
+}
 
 // Spotify device types -> the short word the UI shows under the name.
 const KIND = {
@@ -70,9 +89,9 @@ export function createConnectProvider() {
   // sessions: whatever was left on while listening to an album is still on when
   // the radio starts. Both are incompatible with a walk.
   //
-  // Repeat is the dangerous one. Playback is started ONCE with `play([one uri])`,
-  // so the Spotify context is a single track; with repeat on, the moment the
-  // queue we appended runs out the player returns to that context — which is the
+  // Repeat is the dangerous one. Playback is started ONCE from the seed track's
+  // album, so the Spotify context is that album; with repeat on, the moment the
+  // queue we appended runs out the player returns to that context — back to the
   // first track of the session. "It stopped and went back to the first track" is
   // exactly what that looks like from the outside.
   //
@@ -315,7 +334,7 @@ export function createConnectProvider() {
         }
       }
       try {
-        await api.play([uri], device ? device.id : undefined)
+        await playFromAlbum(uri, device ? device.id : undefined)
         started = true
         lastRef = uri
         clearTransient()
@@ -329,7 +348,7 @@ export function createConnectProvider() {
         if (device && !api.isNetworkError(e) && (e.status === 404 || e.reason === 'NO_ACTIVE_DEVICE')) {
           try {
             await api.transfer(device.id, false)
-            await api.play([uri], device.id)
+            await playFromAlbum(uri, device.id)
             started = true
             lastRef = uri
             clearTransient()
