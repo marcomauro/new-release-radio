@@ -26,6 +26,7 @@ import { readFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { routeYouTube } from './yt_stub.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '..')
@@ -379,6 +380,25 @@ async function openRadio(browser, world, { expiredToken = false, startId } = {})
   await page.waitForSelector('.meta .title', { timeout: 15000 })
   return { context, page }
 }
+
+/** The radio on the YouTube player, with the IFrame API stubbed. No Spotify login. */
+async function openYouTube(browser, { startId, yt = {}, viewport = { width: 420, height: 860 } } = {}) {
+  const context = await browser.newContext({ viewport })
+  const page = await context.newPage()
+  await page.addInitScript(`localStorage.removeItem('nrr_session_v1'); localStorage.removeItem('nrr_sp_tokens')`)
+  await install(page, makeWorld(startId))
+  await routeYouTube(page, yt)
+  await page.goto(`${ORIGIN}${BASE}?player=youtube&track=${startId}`, { waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('.meta .title', { timeout: 15000 })
+  await page.waitForFunction(() => window.__ytStub && window.__ytStub.players.length > 0, null, { timeout: 15000 })
+  return { context, page }
+}
+
+const yt = {
+  calls: (p) => p.evaluate(() => window.__ytStub.calls.slice()),
+  loaded: (p) => p.evaluate(() => window.__ytStub.loaded.slice()),
+}
+const nodeByVideo = new Map(graph.nodes.filter((n) => n.yt).map((n) => [n.yt, n]))
 
 /** Wait until the app has adopted the stub's session and is polling. */
 async function settle(page, world) {
@@ -1019,6 +1039,135 @@ export default async function run() {
       await sleep(8000)
       const sent = world.calls.slice(before).filter((c) => !c.startsWith('GET'))
       check('and nothing more was sent', sent.length === 0, sent.join(', '))
+      await context.close()
+    }
+
+    /* YouTube — the provider that plays one video at a time, in the cover */
+    const ytStart = graph.nodes.find((n) => n.yt && n.degree > 10) || graph.nodes.find((n) => n.yt)
+    const noVideo = graph.nodes.find((n) => !n.yt && n.degree > 10) || graph.nodes.find((n) => !n.yt)
+
+    if (want('y1')) {
+      console.log('\ny1 · YouTube: ▶ plays the track in the cover, and the walk goes on by itself')
+      const { context, page } = await openYouTube(browser, { startId: ytStart.id, yt: { durationSec: 3 } })
+      check('the video sits inside the cover', (await page.locator('.cover .video-host iframe').count()) === 1)
+      check('from the no-cookie domain',
+        (await page.locator('.cover .video-host iframe').getAttribute('data-host')) === 'https://www.youtube-nocookie.com')
+      await page.locator('.bigplay').click()
+      await sleep(1500)
+      const first = (await yt.loaded(page))[0]
+      check('the seed track was loaded', first === ytStart.yt, `${first} vs ${ytStart.yt}`)
+      check('the transport shows Pause', !(await ui.paused(page)))
+      await sleep(9000)
+      const loaded = await yt.loaded(page)
+      check('the walk moved on when each video ended', loaded.length >= 3, `${loaded.length} videos`)
+      check('every video loaded is a track of the archive', loaded.every((v) => nodeByVideo.has(v)), loaded.join(','))
+      check('and the screen names the one playing',
+        (await ui.title(page)) === nodeByVideo.get(loaded[loaded.length - 1]).title, await ui.title(page))
+      check('the walk counter followed', (await ui.step(page)) >= 3, `#${await ui.step(page)}`)
+      await context.close()
+    }
+
+    if (want('y2')) {
+      console.log('\ny2 · YouTube: a seed with no video is passed over, out loud')
+      const { context, page } = await openYouTube(browser, { startId: noVideo.id })
+      check('the screen starts on it', (await ui.title(page)) === noVideo.title)
+      await page.locator('.bigplay').click()
+      await sleep(1500)
+      const loaded = await yt.loaded(page)
+      check('a track with a video was loaded instead', loaded.length === 1 && nodeByVideo.has(loaded[0]), loaded.join(','))
+      check('the screen moved to it', (await ui.title(page)) === nodeByVideo.get(loaded[0]).title, await ui.title(page))
+      const notice = await ui.notice(page)
+      check('and said why', notice.includes(noVideo.title) && /not on YouTube/.test(notice), notice)
+      const upNext = await page.locator('.footer .next').innerText()
+      const nextNode = graph.nodes.find((n) => upNext.startsWith(`${n.title} — ${n.artist}`))
+      check('what comes next has a video too', !!(nextNode && nextNode.yt), upNext)
+      await context.close()
+    }
+
+    if (want('y3')) {
+      console.log('\ny3 · YouTube: an embed its owner refused is skipped, and not chosen again')
+      const { context, page } = await openYouTube(browser, {
+        startId: ytStart.id,
+        yt: { durationSec: 3, refuse: { [ytStart.yt]: 150 } },
+      })
+      await page.locator('.bigplay').click()
+      await sleep(2500)
+      const notice = await ui.notice(page)
+      check('the reason is on screen', /skipped/.test(notice) && /owner does not allow/.test(notice), notice)
+      const loaded = await yt.loaded(page)
+      check('the next track was loaded', loaded.length >= 2 && loaded[1] !== ytStart.yt, loaded.join(','))
+      await sleep(10000)
+      const later = (await yt.loaded(page)).slice(1)
+      check('the refused one did not come back', !later.includes(ytStart.yt), later.join(','))
+      await context.close()
+    }
+
+    if (want('y4')) {
+      console.log('\ny4 · YouTube: pause, resume, seek, volume and next reach the player')
+      const { context, page } = await openYouTube(browser, { startId: ytStart.id, yt: { durationSec: 60 } })
+      await page.locator('.bigplay').click()
+      await sleep(1500)
+      await page.locator('.ctl.main[title="Pause"]').click()
+      await sleep(700)
+      check('pause reached the player', (await yt.calls(page)).includes('pause'))
+      check('the transport offers Play', await ui.paused(page))
+      await page.locator('.ctl.main[title="Play"]').click()
+      await sleep(1200)
+      const calls = await yt.calls(page)
+      check('play resumed instead of reloading',
+        calls.filter((c) => c.startsWith('load ')).length === 1 && calls.includes('play'), calls.join(', '))
+      check('and it is playing', !(await ui.paused(page)))
+      const track = page.locator('.bar .track')
+      const box = await track.boundingBox()
+      await track.click({ position: { x: Math.round(box.width / 2), y: Math.round(box.height / 2) } })
+      await sleep(600)
+      check('a click on the line seeks', (await yt.calls(page)).some((c) => /^seek (29|30|31)$/.test(c)),
+        (await yt.calls(page)).filter((c) => c.startsWith('seek')).join(', '))
+      await page.locator('.volume input').fill('35')
+      await sleep(800)
+      check('the volume reached the player', (await yt.calls(page)).includes('volume 35'),
+        (await yt.calls(page)).filter((c) => c.startsWith('volume')).join(', '))
+      await page.locator('.ctl[title^="Next"]').click()
+      await sleep(1200)
+      const loads = (await yt.calls(page)).filter((c) => c.startsWith('load '))
+      check('next loaded another video', loads.length === 2 && loads[1] !== loads[0], loads.join(', '))
+      await context.close()
+    }
+
+    if (want('y5')) {
+      console.log('\ny5 · YouTube on a phone that blocks playback a tap did not start')
+      const { context, page } = await openYouTube(browser, {
+        startId: ytStart.id,
+        yt: { blockAutoplay: true, durationSec: 60 },
+        viewport: { width: 390, height: 844 },
+      })
+      await page.locator('.bigplay').click()
+      await sleep(6000)
+      const notice = await ui.notice(page)
+      check('the radio says to tap the video', /tap the video/.test(notice), notice)
+      check('the transport does not pretend it is playing', await ui.paused(page))
+      await page.evaluate(() => window.__ytStub.tap())
+      await sleep(1500)
+      check('a tap on the video starts it', !(await ui.paused(page)))
+      check('and the hint goes away', !/tap the video/.test(await ui.notice(page)), await ui.notice(page))
+      await context.close()
+    }
+
+    if (want('y6')) {
+      console.log('\ny6 · leaving YouTube for the previews leaves one player, not two')
+      const { context, page } = await openYouTube(browser, { startId: ytStart.id, yt: { durationSec: 60 } })
+      await page.locator('.bigplay').click()
+      await sleep(1500)
+      await page.locator('.topbar .chip').last().click()
+      await page.waitForSelector('.panel', { timeout: 5000 })
+      await page.locator('.panel > .row .chip', { hasText: 'player' }).click()
+      check('YouTube is listed and chosen', (await page.locator('.panel .opt.on', { hasText: 'YouTube' }).count()) === 1)
+      await page.locator('.panel .opt', { hasText: 'Spotify preview' }).click()
+      await sleep(1200)
+      const calls = await yt.calls(page)
+      check('the video was paused and the player taken down',
+        calls.includes('pause') && calls[calls.length - 1] === 'destroy', calls.slice(-3).join(', '))
+      check('no YouTube iframe is left', (await page.locator('iframe.yt-fake').count()) === 0)
       await context.close()
     }
 

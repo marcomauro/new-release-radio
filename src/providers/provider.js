@@ -17,6 +17,10 @@
      authenticate()              → start a login flow (may navigate away)
      mount(el) / unmount()       → optional DOM host (iframe embeds)
      resolve(track)              → platform ref for an archive track, or null
+     playable(track)             → optional, synchronous: false when this
+                                   platform cannot play the track at all (no
+                                   match, or a match it refused). The walk then
+                                   never chooses it — see core/walker.js
      trackIdFromRef(ref)         → archive id for a platform ref, or null
      start(track)                → play this track now
      adopt(ref)                  → optional: take over a session already playing
@@ -49,7 +53,11 @@
 
    Snapshot (everything optional except `playing`):
      { playing, position, duration, ref, endedRef, artwork, message, authError,
-       stale, volume, volumeAvailable, repeat, shuffle }
+       stale, volume, volumeAvailable, repeat, shuffle, skipped }
+
+   `skipped` goes with an `endedRef` that ended early: one short sentence on
+   why the platform gave up on the track (an embed its owner disabled …). The
+   engine says it out loud and moves on.
 
    Result, the answer to every command:
      { ok, kind, message }   kind: '' | 'network' | 'http' | 'auth'
@@ -80,6 +88,7 @@ export const CAPS = {
   VOLUME: 'volume', // can set the playback volume
   OUTPUTS: 'outputs', // can list and switch the device the audio comes out of
   SILENT: 'silent', // no audio at all (rule development)
+  VIDEO: 'video', // the player is a video that must stay on screen (YouTube)
 }
 
 export function makeSnapshot(partial = {}) {
@@ -97,6 +106,7 @@ export function makeSnapshot(partial = {}) {
     volumeAvailable: false,
     repeat: null,
     shuffle: null,
+    skipped: '',
     ...partial,
   }
 }

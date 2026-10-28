@@ -19,7 +19,14 @@ import { gLabel } from '../theme.js'
    tap, and by itself when the track changes: a new track has earned its image.
 
    Nothing on the back is invented. Every line is a field of the archive, and
-   the two that are inferred rather than measured say so. */
+   the two that are inferred rather than measured say so.
+
+   With a video player (YouTube) the front of the sleeve IS the video: its
+   terms want it on screen with nothing laid over it once it plays. The host
+   element is handed in by the app and must never be remounted — an iframe that
+   moves in the DOM reloads — so it is rendered unconditionally in video mode.
+   The cover does not turn over there: a tap on the video belongs to YouTube
+   (on a phone it is how playback starts when the browser blocked ours). */
 
 const initials = (node) =>
   (node ? node.artist || node.title || '' : '')
@@ -156,7 +163,7 @@ function Back({ node, why }) {
 // reading — the browser reports a click at the end of the gesture either way.
 const TAP_SLOP = 12
 
-export default function Cover({ cover, node, started, playing, onPlay, connectFirst, onConnect, why }) {
+export default function Cover({ cover, node, started, playing, onPlay, connectFirst, onConnect, why, videoHost }) {
   const [src, setSrc] = useState(null)
   const [failed, setFailed] = useState(false)
   const [flipped, setFlipped] = useState(false)
@@ -176,11 +183,11 @@ export default function Cover({ cover, node, started, playing, onPlay, connectFi
   const showImage = src && !failed
   // Before the first play the cover carries the way in, so it must not flip:
   // the tap belongs to Connect (or previews), not to a detail view.
-  const canFlip = started && !!node
+  const canFlip = started && !!node && !videoHost
 
   return (
     <div
-      className={`cover${playing ? '' : ' idle'}${flipped ? ' flipped' : ''}`}
+      className={`cover${playing ? '' : ' idle'}${flipped ? ' flipped' : ''}${videoHost ? ' video' : ''}`}
       onPointerDown={canFlip ? (e) => { down.current = { x: e.clientX, y: e.clientY } } : undefined}
       onClick={
         canFlip
@@ -220,6 +227,7 @@ export default function Cover({ cover, node, started, playing, onPlay, connectFi
           ) : (
             <div className="fallback">{initials(node) || '♫'}</div>
           )}
+          {videoHost && <div className="video-host" ref={videoHost} />}
           {!started &&
             (connectFirst ? (
               <div className="veil offer">

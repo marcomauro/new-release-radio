@@ -15,7 +15,9 @@ import { gColor, gLabel } from './theme.js'
    There is exactly ONE player on this page — ours. When previews are the source,
    Spotify's iframe still does the decoding, but it is caged (see `.embed-cage`:
    the iFrame API replaces the element it is given, so the cage is what carries
-   the styling) and driven entirely by the controls below. */
+   the styling) and driven entirely by the controls below. YouTube is the one
+   exception to "out of sight": its terms want the video on screen, so it plays
+   in the cover's place (ui/Cover.jsx), still driven by the same controls. */
 
 // Touch + no hover: a phone or a tablet. Used for the one decision that really
 // differs there — Connect first, previews as a named fallback.
@@ -38,9 +40,11 @@ export default function App() {
     document.documentElement.style.setProperty('--genre', gColor(genre))
   }, [genre])
 
-  // The preview provider needs a DOM host for the official iframe player.
+  // The preview provider needs a DOM host for the official iframe player; a
+  // video player (YouTube) gets one inside the cover, where it stays visible.
   const provider = radio.provider
   const needsHost = !!(provider && provider.mount)
+  const isVideo = !!(provider && provider.caps.has(CAPS.VIDEO))
   useEffect(() => {
     if (!needsHost || !hostRef.current) return
     provider.mount(hostRef.current)
@@ -128,6 +132,7 @@ export default function App() {
             connectFirst={touch && isPreview && radio.canConnect}
             onConnect={radio.connectSpotify}
             why={radio.why}
+            videoHost={needsHost && isVideo ? hostRef : null}
           />
         </div>
 
@@ -171,7 +176,7 @@ export default function App() {
             its own iframe, so the CAGE carries the styling that keeps it out of
             sight — otherwise Spotify's player lands in the layout with its own
             controls. Ours are the only ones on screen. */}
-        {needsHost && (
+        {needsHost && !isVideo && (
           <div className="embed-cage" aria-hidden="true">
             <div ref={hostRef} />
           </div>

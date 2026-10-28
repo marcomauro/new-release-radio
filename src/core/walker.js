@@ -14,6 +14,12 @@
    When nothing survives (a corner of the graph is exhausted) the walk jumps:
    same procedure over the whole archive instead of the neighbourhood.
 
+   A station can also be told which tracks the current player can play at all
+   (`setPlayable`: YouTube has no video for some of the archive). That is not a
+   rule and is never relaxed — a track nobody can hear is not a choice — unless
+   it would leave nothing at all, when the walk goes on as if it were not there
+   and the player says why it is silent.
+
    State is a plain immutable-ish snapshot and the RNG is derived from
    (seed, step number), so the *same* state always produces the *same* next
    track. That is what makes the lookahead free — peeking N tracks ahead and
@@ -238,10 +244,17 @@ function admissible(ctx, cand, dropped) {
 /**
  * Pure step: given a state, return the chosen track and the state that
  * includes it. Never returns null unless the archive itself is empty.
+ *
+ * `playable(node)`, when given, keeps tracks the player cannot play out of the
+ * choice. It is dropped only if it would leave nothing at all.
  * @returns {{step: Step, state: WalkState}|null}
  */
-export function nextStep(state, index, ruleset, seed) {
+export function nextStep(state, index, ruleset, seed, playable = null) {
   if (!index.nodes.length) return null
+  return (playable && stepAmong(state, index, ruleset, seed, playable)) || stepAmong(state, index, ruleset, seed, null)
+}
+
+function stepAmong(state, index, ruleset, seed, only) {
   const ctx = makeContext(state, index, ruleset)
   const scorers = activeScorers(ruleset)
   const rnd = rngFor(seed, state.played.length)
@@ -254,6 +267,7 @@ export function nextStep(state, index, ruleset, seed) {
       const candidates = pool || index.nodes
       const scored = []
       for (const cand of candidates) {
+        if (only && !only(cand)) continue
         if (!admissible(ctx, cand, dropped)) continue
         scored.push({ node: cand, score: scoreCandidate(ctx, cand, scorers) })
       }
@@ -320,6 +334,7 @@ export function createStation({ index, ruleset = DEFAULT_RULESET, seedNode, seed
   let rngSeed = seed || (seedNode ? seedNode.id : 'radio')
   let state = emptyState()
   let queue = [] // [{ step, state }] — provisional, already-decided future
+  let playable = null // (node) => boolean: what the current player can play
   const listeners = new Set()
 
   const emit = () => listeners.forEach((fn) => fn())
@@ -333,7 +348,7 @@ export function createStation({ index, ruleset = DEFAULT_RULESET, seedNode, seed
   function fill() {
     while (queue.length < lookahead) {
       const from = queue.length ? queue[queue.length - 1].state : state
-      const r = nextStep(from, index, rules, rngSeed)
+      const r = nextStep(from, index, rules, rngSeed, playable)
       if (!r) break
       queue.push(r)
     }
@@ -443,6 +458,21 @@ export function createStation({ index, ruleset = DEFAULT_RULESET, seedNode, seed
       queue = []
       fill()
       emit()
+    },
+
+    /**
+     * Tell the walk which tracks the player can play (null = all of them).
+     * Like a rule change, the decided future is re-decided; the current track
+     * stays where it is — the engine decides what to do with it.
+     */
+    setPlayable(fn) {
+      playable = fn || null
+      queue = []
+      fill()
+      emit()
+    },
+    canPlay(node) {
+      return !!node && (!playable || playable(node))
     },
 
     /* --- persistence: resume the same station after a reload --- */

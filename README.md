@@ -9,7 +9,7 @@ actually connected.
 The map is the other project. Here there is **no graph on screen**: just the
 cover of what is playing, its title, and one line saying why the walk chose it.
 
-Archive: **873 tracks · 7667 links · 12 genres** (playlists #1–#39 + 1 extra, updated 2026-07-26).
+Archive: **1055 tracks · 9739 links · 12 genres** (playlists #1–#49 + 1 extra, updated 2026-10-26).
 
 ---
 
@@ -39,7 +39,7 @@ Archive: **873 tracks · 7667 links · 12 genres** (playlists #1–#39 + 1 extra
         │
    radio/useRadio.js  the engine: walk ⇄ player
         │
-   providers/         Spotify Connect · Spotify preview · Dry run
+   providers/         Spotify Connect · YouTube · Spotify preview · Dry run
         │
    ui/                cover, two lines, three buttons
 ```
@@ -105,13 +105,25 @@ npm run preview   # serve dist/ for a realistic check
 
 ## Listening
 
-Three players ship, picked from the provider registry:
+Four players ship, picked from the provider registry:
 
 | player | what you hear | needs |
 | --- | --- | --- |
 | **Spotify preview** (default) | 30 s previews, advanced automatically | nothing |
 | **Spotify Connect** | **whole tracks**, on your own Spotify device | Premium login |
+| **YouTube** | **whole tracks**, the video playing where the cover is | nothing |
 | **Dry run** | nothing — a silent walk at up to 120× | nothing |
+
+**YouTube** plays the video New Release Atlas matched to each track (the `yt`
+field of `graph.json`, resolved offline there and confirmed by hand where it was
+doubtful). Not every track has one, so on YouTube the walk only chooses tracks
+that do; a track picked by hand without a video, or one whose owner has
+disabled embedding, is passed over and the notice line says which and why.
+YouTube's terms want the video seen, so it is the one player that is not caged:
+it plays in the cover's square, with nothing laid over it. Two limits come with
+it on a phone: a browser may want the first tap on the video itself (the
+radio says so), and a video does not play while the app is in the background.
+Pick it in the panel, or open `?player=youtube`.
 
 **Spotify Connect is the real radio.** Playback is started once on the seed
 track and every track the walk decides is appended to Spotify's own queue

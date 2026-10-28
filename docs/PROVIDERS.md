@@ -9,7 +9,7 @@ playback contract. This document is what you need to add a second platform.
         │
       radio/useRadio   the engine           ← speaks only the contract below
         │
-      providers/       how it is heard      ← Spotify Connect · Spotify preview · Dry run
+      providers/       how it is heard      ← Spotify Connect · YouTube · Spotify preview · Dry run
 ```
 
 The proof this seam is real is the **Dry run** provider
@@ -31,6 +31,7 @@ version):
 | `init()` | ✔ | finish a pending OAuth redirect, load an SDK |
 | `status()` | ✔ | `{ available, authenticated, message, messageKind, device }` — `messageKind: 'network'` keeps a dropped connection off the notice line, where it belongs to the device pill instead |
 | `resolve(track)` | ✔ | archive track → platform ref (a URI, an URL, an internal id) |
+| `playable(track)` | – | synchronous: `false` when the platform cannot play this track at all. The engine hands it to the walk (`station.setPlayable`), which then never chooses such a track, and passes over a current one out loud. See "Tracks a platform does not have" below |
 | `trackIdFromRef(ref)` | ✔ | the inverse: platform ref → archive id, or `null` |
 | `start(track)` | ✔ | play this track **now** |
 | `poll()` | ✔ | a `Snapshot` — the single source of playback truth |
@@ -63,6 +64,7 @@ version):
   stale,      // WE COULD NOT ASK — nothing else in here is news
   volume,        // 0-100 or null when unknown
   volumeAvailable, // false disables the slider (and the UI explains why)
+  skipped,    // with an endedRef that ended early: why, in one sentence (said out loud)
 }
 ```
 
@@ -107,6 +109,7 @@ Helpers for all three shapes are in `providers/provider.js`: `makeSnapshot`,
 | `CAPS.VOLUME` | the volume slider is live; without it the slider is shown disabled with the reason. |
 | `CAPS.OUTPUTS` | the device pill appears in the top bar and in the panel. |
 | `CAPS.SILENT` | no audio (dry run). |
+| `CAPS.VIDEO` | the player is a video that must stay on screen: its host goes in the cover's square instead of the off-screen cage. |
 
 `CAPS.QUEUE` is the one worth implementing: it is what makes the stream truly
 gapless, because the platform never waits for us between tracks.
@@ -146,6 +149,21 @@ Notes from experience with this archive:
   recognise a track the platform started on its own.
 - A track that cannot be matched should return `null` — the engine treats it as
   a dead end and the walk moves on. Do not substitute a different recording.
+
+### Tracks a platform does not have
+
+[`src/providers/youtube.js`](../src/providers/youtube.js) is the worked
+example. Its matches are resolved **offline**, by New Release Atlas, and arrive
+in `graph.json` as the node's `yt` field — so `resolve()` is a lookup and
+`playable()` can answer synchronously. That is what lets the walk itself avoid
+the gaps: a station told `setPlayable(fn)` drops every candidate `fn` rejects,
+before any rule scores it, and never relaxes that (a track nobody can hear is
+not a choice). Only if it would leave nothing at all does the walk go on as if
+it were not there, and the engine says the player has nothing to play.
+
+What the offline match cannot know — an owner who disables embedding later — is
+found at play time: the provider ends the track with `endedRef` and a `skipped`
+reason, and from then on reports it unplayable for the session.
 
 ---
 
