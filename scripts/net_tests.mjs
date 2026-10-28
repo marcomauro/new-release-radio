@@ -66,9 +66,10 @@ function makeWorld(startId) {
     current: startId,
     position: 12000,
     queue: [], // track ids Spotify holds, in order
-    // The CONTEXT: what `play(uris)` established. A real player falls back to it
-    // when the queue runs out — and the radio starts a context of ONE track, so
-    // that fallback replays the first track of the session. This is the model
+    // The CONTEXT: what the starting `play` established. A real player falls
+    // back to it when the queue runs out — modelled here as the first track of
+    // the session alone (its album, in the real radio), so that fallback
+    // replays it. This is the model
     // the earlier stub was missing, and the reason it could not reproduce
     // "playback went back to the first track".
     context: [startId],
@@ -100,6 +101,14 @@ function makeWorld(startId) {
 /** What a real player does when the appended queue is exhausted. */
 function afterQueue(world) {
   if (world.repeat === 'track') return // the same track again
+  if (world.contextUri && world.repeat === 'off') {
+    // Started from an album (the radio does, see api.playContext): the album
+    // goes on, with a track the archive does not have.
+    world.current = `albumnext${world.context[0]}`.slice(0, 22)
+    world.position = 0
+    world.playing = !world.deaf
+    return
+  }
   if (world.repeat === 'context' || world.repeat === 'off') {
     // Repeat off ends playback; repeat on context replays it. Both are worth
     // modelling, and with a one-track context they look the same from here.
@@ -117,7 +126,7 @@ const item = (id) => {
     duration_ms: Math.round(((n && n.duration_sec) || 210) * 1000),
     uri: `spotify:track:${id}`,
     artists: [{ name: (n && n.artist) || 'unknown' }],
-    album: { images: [{ url: `${ORIGIN}${BASE}favicon.svg`, width: 640, height: 640 }] },
+    album: { uri: `spotify:album:of-${id}`, images: [{ url: `${ORIGIN}${BASE}favicon.svg`, width: 640, height: 640 }] },
   }
 }
 
@@ -163,15 +172,26 @@ function answer(world, method, path, search, body) {
   }
   if (method === 'PUT' && p === '/me/player/play') {
     const uris = body && body.uris
-    // A resume with nothing loaded has nothing to resume.
-    if (!(uris && uris.length) && !world.current) return NO_DEVICE
+    const context = body && body.context_uri
+    // A bare `uris` list is what Spotify stopped honouring (October 2026): 204,
+    // then the client sits with nothing loaded. Modelled as such, so a return
+    // to it fails the suite instead of passing it.
     if (uris && uris.length) {
+      world.current = null
+      world.playing = false
+      world.queue = []
+      return { status: 204 }
+    }
+    // A resume with nothing loaded has nothing to resume.
+    if (!context && !world.current) return NO_DEVICE
+    if (context) {
       // A real `play` replaces the context: this is the restart we must never
       // see happen from a stale state.
-      world.current = idFromUri(uris[0])
+      world.current = idFromUri(body.offset && body.offset.uri)
       world.position = 0
       world.queue = []
-      world.context = uris.map(idFromUri)
+      world.context = [world.current]
+      world.contextUri = context
     }
     world.playing = !world.deaf && !world.asleep
     return { status: 204 }
@@ -220,6 +240,9 @@ function answer(world, method, path, search, body) {
   if (method === 'PUT' && p === '/me/player/seek') {
     world.position = Number(search.get('position_ms')) || 0
     return { status: 204 }
+  }
+  if (method === 'GET' && p.startsWith('/tracks/')) {
+    return { json: item(decodeURIComponent(p.slice('/tracks/'.length))) }
   }
   if (method === 'GET' && p.startsWith('/tracks')) {
     const ids = (search.get('ids') || '').split(',').filter(Boolean)
@@ -294,7 +317,7 @@ async function install(page, world) {
     // A restart and a resume are the same endpoint; only the body tells them
     // apart, and only one of them is the bug.
     let label = `${method} ${url.pathname.replace('/v1', '')}`
-    if (label === 'PUT /me/player/play' && body && body.uris) label += ' [restart]'
+    if (label === 'PUT /me/player/play' && body && (body.uris || body.context_uri)) label += ' [restart]'
     world.calls.push(label)
     if (out.status === 204) return route.fulfill({ status: 204, body: '' })
     return route.fulfill({
@@ -659,6 +682,36 @@ export default async function run() {
         !/followed your player/i.test(await ui.why(page)), await ui.why(page))
       check('the queue was refilled', world.queue.length >= 1, `${world.queue.length} queued`)
       console.log(`  recovered to "${(world.current && nodeById.get(world.current) || {}).title}" · ${behind} had been queued`)
+      await context.close()
+    }
+
+    /* 24 — the queue ran dry and the seed's album went on by itself */
+    if (want(24)) {
+      console.log('\n24 · the queue runs out and the album the station started from goes on')
+      const world = makeWorld(startId)
+      const { context, page } = await openRadio(browser, world, { startId })
+      await settle(page, world)
+      await page.locator('.ctl[title^="Next"]').click() // see case 12
+      await sleep(3000)
+      const step0 = await ui.step(page)
+      // The station started from the seed's album (api.playContext): once
+      // everything we handed over has played, Spotify carries on with that
+      // album — still playing, on a track the archive does not have.
+      world.contextUri = `spotify:album:of-${world.context[0]}`
+      world.queue = []
+      afterQueue(world)
+      const foreign = world.current
+      await sleep(12000)
+
+      const step1 = await ui.step(page)
+      check('the album track was not left playing', world.current !== foreign,
+        `current=${world.current}`)
+      check('the radio is playing the walk again', world.playing === true && nodeById.has(world.current),
+        `playing=${world.playing} current=${world.current}`)
+      check('the walk moved on instead of pausing', step1 > step0, `#${step0} → #${step1}`)
+      check('it did not stop on "outside the archive"',
+        !/outside the archive/i.test(await ui.why(page)), await ui.why(page))
+      check('the queue was refilled', world.queue.length >= 1, `${world.queue.length} queued`)
       await context.close()
     }
 

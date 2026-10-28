@@ -121,9 +121,12 @@ Two consequences worth stating on their own:
   playing right now buys nothing, because when it ends we may be no more able to
   act than we are now.
 - **And when it runs dry anyway, that is a state to recognise, not to follow.**
-  Playback is started once with `play([one uri])`, so the Spotify context is a
-  single track: a player that exhausts the queue falls back to that context and
-  lands on the **first track of the session**. Following it would re-anchor the
+  Playback is started once from the seed track's **album** (Spotify no longer
+  plays a bare `play([uri])`: since October 2026 the clients take it and stay
+  silent), so a player that exhausts the queue falls back to that album. Either
+  it goes on with tracks the archive does not have — read as running out when
+  nothing of ours is left on the platform — or, before this change and with
+  repeat on, it landed on the **first track of the session**. Following it would re-anchor the
   walk there and the station would silently start over. Stopped at position ~0
   with nothing of ours left on the platform is read as "the stream ran out": the
   walk advances past everything that played while we were blind and starts the
@@ -183,8 +186,9 @@ until the user pressed "steer from here".
 
 What remains true, and what a real fix would need:
 
-- the root of this whole family of problems is that playback is started with
-  `play([one uri])`, so the Spotify context is a **single track**. That is what
+- the root of this whole family of problems is that playback is started from a
+  context we do not control — a **single track** until October 2026, the seed
+  track's **album** since Spotify stopped playing a bare `play([uri])`. That is what
   makes the queue the only continuity we have, what sends the player back to the
   first track when the queue empties, and what lets autoplay into the queue at
   all;

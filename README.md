@@ -321,8 +321,10 @@ new-release-radio/
 - **Sharing a station.** A walk is reproducible from `(seed, preset, archive)`,
   so a station is a URL: `?seed=<track-id>&preset=drift`.
 - **A rolling playlist instead of the queue — decided when the current build has
-  been lived with.** Playback is started with `play([one uri])`, so the Spotify
-  context is a *single track*. That one fact is the root of the whole family of
+  been lived with.** Playback is started from the seed track's *album* (since
+  October 2026 Spotify no longer plays a bare `play([uri])`: the clients take
+  it and stay silent), and the walk lives in the queue on top of it. Before
+  that the context was a *single track*, the root of the whole family of
   playback bugs this app has had: the return to the first track when the queue
   empties, the stall that followed it, and Spotify's autoplay leaking into the
   queue we read. One private playlist, used as the context and appended to as the
