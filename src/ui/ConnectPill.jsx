@@ -2,9 +2,9 @@ import React from 'react'
 
 /* The single call to action on the main screen.
 
-   Without it, someone with a Premium account had no way out of preview mode
-   without discovering the panel: the preview provider has no login of its own,
-   so the pill asks the registry for the player that can do full tracks. */
+   Without it, someone with a Premium account had no way from YouTube to their
+   own Spotify devices without discovering the panel: YouTube has no Spotify
+   login of its own, so the pill asks the registry for the player that has. */
 
 const Glyph = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true">

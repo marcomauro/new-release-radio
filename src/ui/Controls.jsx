@@ -57,8 +57,7 @@ export function ProgressBar({ position, duration, seekable, onSeek }) {
 
 /**
  * Volume for whatever is playing — on Connect it drives the real device volume.
- * When the platform has no volume control at all (the Spotify preview embed does
- * not), the slider stays visible but disabled and says why: a dead control is
+ * When the platform refuses volume (a phone sets its own), the slider stays visible but disabled and says why: a dead control is
  * worse than an honest one.
  */
 export function Volume({ value, available, onChange, unavailableReason, onUnavailable }) {
@@ -123,7 +122,7 @@ export default function Controls({
   return (
     <div className={`controls${showVolume ? ' with-volume' : ''}`}>
       <div className="transport">
-        <button className="ctl" onClick={onReseed} title="New station — start somewhere else">
+        <button className="ctl" onClick={onReseed} title="New path — start somewhere else in the Atlas">
           <Shuffle />
         </button>
         <button className="ctl main" onClick={onToggle} title={playing ? 'Pause' : 'Play'}>

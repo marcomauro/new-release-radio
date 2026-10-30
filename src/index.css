@@ -1025,38 +1025,6 @@ input {
   min-height: 14px;
 }
 
-/* The Spotify preview engine, caged.
-
-   The Spotify iFrame API REPLACES the element it is handed with its own
-   <iframe>, so styling that element achieves nothing: the iframe lands in the
-   normal flow, full width, with Spotify's own controls — which is exactly the
-   green bar that used to appear under our player. So we style the CAGE and let
-   the API do whatever it likes to the child inside it.
-
-   The cage stays inside the viewport at a plausible size (a 1px, display:none
-   or off-screen embed risks never initialising, and players do sometimes stop
-   when scrolled out of view) but is invisible and cannot be clicked. The audio
-   comes from here; every control belongs to our player. */
-.embed-cage {
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 320px;
-  height: 80px;
-  overflow: hidden;
-  opacity: 0;
-  pointer-events: none;
-  z-index: -1;
-}
-
-.embed-cage > *,
-.embed-cage iframe {
-  width: 100% !important;
-  height: 100% !important;
-  border: 0;
-}
-
 /* --- panel --------------------------------------------------------------- */
 
 .panel {
@@ -1239,6 +1207,32 @@ input {
 
 .hit:hover {
   color: var(--genre);
+}
+
+/* A track the current player cannot play (YouTube has no video for it):
+   listed, so the search is not a mystery, but not a place to start. */
+.hit:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.hit:disabled:hover {
+  color: inherit;
+}
+
+/* "Start in a genre": the genre's own hue, as on the map. */
+.chip.genre {
+  color: var(--g);
+  border-color: color-mix(in srgb, var(--g) 45%, transparent);
+}
+
+.chip.genre:hover {
+  color: var(--ink);
+  border-color: var(--g);
+}
+
+.chip.genre .count {
+  color: var(--dim);
 }
 
 .info {

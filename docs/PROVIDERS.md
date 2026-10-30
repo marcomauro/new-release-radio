@@ -9,12 +9,13 @@ playback contract. This document is what you need to add a second platform.
         │
       radio/useRadio   the engine           ← speaks only the contract below
         │
-      providers/       how it is heard      ← Spotify Connect · YouTube · Spotify preview · Dry run
+      providers/       how it is heard      ← Spotify Connect · YouTube
 ```
 
-The proof this seam is real is the **Dry run** provider
-([`src/providers/simulated.js`](../src/providers/simulated.js)): the whole radio
-runs on a clock, with no streaming service at all, in 90 lines.
+The proof this seam is real is the **YouTube** provider
+([`src/providers/youtube.js`](../src/providers/youtube.js)): a second platform,
+with no account, a video instead of a remote device, and tracks it does not
+have — and nothing above `providers/` knows it is there.
 
 ---
 
@@ -104,12 +105,10 @@ Helpers for all three shapes are in `providers/provider.js`: `makeSnapshot`,
 | `CAPS.QUEUE` | the engine starts playback once and **appends** each decided track. Continuity is the platform's job; the walk follows what `poll()` reports — including a track the *user* started, which simply becomes the new cursor position. |
 | no `CAPS.QUEUE` | the engine advances the walk itself when `poll()` reports `endedRef`, then calls `start()`. |
 | `CAPS.SEEK` | the progress line becomes draggable. |
-| `CAPS.PREVIEW` | the UI expects a fragment, not a whole track. |
 | `CAPS.ARTWORK` | covers come from the provider; otherwise the placeholder is used. |
 | `CAPS.VOLUME` | the volume slider is live; without it the slider is shown disabled with the reason. |
 | `CAPS.OUTPUTS` | the device pill appears in the top bar and in the panel. |
-| `CAPS.SILENT` | no audio (dry run). |
-| `CAPS.VIDEO` | the player is a video that must stay on screen: its host goes in the cover's square instead of the off-screen cage. |
+| `CAPS.VIDEO` | the player is a video that must stay on screen: its host goes in the cover's square. |
 
 `CAPS.QUEUE` is the one worth implementing: it is what makes the stream truly
 gapless, because the platform never waits for us between tracks.
@@ -174,7 +173,7 @@ reason, and from then on reports it unplayable for the session.
 import { createTidalProvider } from './tidal/index.js'
 
 export function createProviders() {
-  return [createConnectProvider(), createEmbedProvider(), createTidalProvider(), createSimulatedProvider()]
+  return [createConnectProvider(), createYouTubeProvider(), createTidalProvider()]
 }
 ```
 

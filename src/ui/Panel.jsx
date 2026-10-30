@@ -1,12 +1,12 @@
 import React, { useMemo, useState } from 'react'
-import { PRESETS, SCORERS, CONSTRAINTS } from '../core/rules.js'
+import { PRESETS, SCORERS, CONSTRAINTS, LINK_KINDS, presetById, genreRunCapFor } from '../core/rules.js'
 import { searchTracks, archiveDuration, REMOTE_GRAPH_URL } from '../core/graph.js'
-import { gLabel } from '../theme.js'
+import { gColor, gLabel } from '../theme.js'
 import { CAPS } from '../providers/index.js'
 
 /* Everything that is not the cover lives behind one button. The panel is a
-   list of small decisions: which station, which rules, which player, where to
-   start. No graph, no charts — the map is the other project. */
+   list of small decisions: which path through the Atlas, which rules, which
+   player, where to start. No graph, no charts — the map is the other project. */
 
 function Slider({ name, desc, value, min, max, step, onChange, format }) {
   return (
@@ -41,17 +41,29 @@ const BUILD = {
 }
 
 export default function Panel({ radio, onClose }) {
-  const [tab, setTab] = useState('station')
+  const [tab, setTab] = useState('path')
   const [q, setQ] = useState('')
   const index = radio.archive ? radio.archive.index : null
   const hits = useMemo(() => (index && q ? searchTracks(index, q, 10) : []), [index, q])
   const dur = useMemo(() => (index ? archiveDuration(index) : null), [index])
   const rs = radio.ruleset
   const outputs = radio.outputs || []
+  const provider = radio.provider
+  const canPlay = (n) => !provider || !provider.playable || provider.playable(n)
+  // Genres by size, largest first: the corners of the map worth starting in.
+  const genres = useMemo(
+    () => (index ? [...index.byGenre.entries()].sort((a, b) => b[1].length - a[1].length) : []),
+    [index]
+  )
+  // The link weights in force: the ruleset's own, else the Atlas's.
+  const links = rs.links || (index && index.meta.linkWeights) || {}
 
-  const patch = (part) => radio.setRuleset({ ...rs, ...part })
-  const patchWeights = (id, v) => radio.setRuleset({ ...rs, weights: { ...rs.weights, [id]: v } })
-  const patchLimits = (id, v) => radio.setRuleset({ ...rs, limits: { ...rs.limits, [id]: v } })
+  // Every hand-made change marks the ruleset as tuned: it keeps the preset's
+  // name, says it is no longer the preset, and is saved whole.
+  const patch = (part) => radio.setRuleset({ ...rs, ...part, custom: true })
+  const patchWeights = (id, v) => patch({ weights: { ...rs.weights, [id]: v } })
+  const patchLimits = (id, v) => patch({ limits: { ...rs.limits, [id]: v } })
+  const patchLinks = (id, v) => patch({ links: { ...links, [id]: v } })
 
   return (
     <div className="panel">
@@ -64,16 +76,20 @@ export default function Panel({ radio, onClose }) {
       </div>
 
       <div className="row" style={{ marginTop: 16 }}>
-        {['station', 'rules', 'player', 'start'].map((t) => (
+        {['path', 'rules', 'player', 'start'].map((t) => (
           <button key={t} className={`chip${tab === t ? ' on' : ''}`} onClick={() => setTab(t)}>
             {t}
           </button>
         ))}
       </div>
 
-      {tab === 'station' && (
+      {tab === 'path' && (
         <>
-          <h2>Station</h2>
+          <h2>How the radio walks the Atlas</h2>
+          <p className="info">
+            Every track is a point on the New Release Atlas map; the radio moves along its links,
+            one track at a time. A path is a way of choosing the next link.
+          </p>
           <div className="row">
             {PRESETS.map((p) => (
               <button
@@ -81,11 +97,22 @@ export default function Panel({ radio, onClose }) {
                 className={`opt${rs.id === p.id ? ' on' : ''}`}
                 onClick={() => radio.setRuleset(p)}
               >
-                <div className="name">{p.label}</div>
+                <div className="name">
+                  {p.label}
+                  {rs.id === p.id && rs.custom ? ' · tuned' : ''}
+                </div>
                 <div className="sub">{p.blurb}</div>
               </button>
             ))}
           </div>
+          {rs.custom && (
+            <p className="info" style={{ marginTop: 12 }}>
+              Tuned by hand in <em>rules</em>.{' '}
+              <button className="chip" onClick={() => radio.setRuleset(presetById(rs.id))}>
+                back to {rs.label}
+              </button>
+            </p>
+          )}
 
           <h2>Just played</h2>
           <div>
@@ -127,12 +154,17 @@ export default function Panel({ radio, onClose }) {
           />
           <Slider
             name="Genre stretch"
-            desc="Preferred number of tracks before the walk looks for another genre."
+            desc={`Preferred number of tracks before the walk looks for another genre; after ${rs.limits.genreRunMax} it must change.`}
             value={rs.targets.genreRun}
             min={1}
             max={14}
             step={1}
-            onChange={(v) => radio.setRuleset({ ...rs, targets: { ...rs.targets, genreRun: v } })}
+            onChange={(v) =>
+              patch({
+                targets: { ...rs.targets, genreRun: v },
+                limits: { ...rs.limits, genreRunMax: genreRunCapFor(v) },
+              })
+            }
           />
           <Slider
             name="Artist spacing"
@@ -144,7 +176,27 @@ export default function Panel({ radio, onClose }) {
             onChange={(v) => patchLimits('artistGap', v)}
           />
 
-          <h2>Rules</h2>
+          <h2>Which links are paths</h2>
+          <p className="info">
+            The links of the Atlas graph, by kind. The walk follows a link in proportion to its
+            weight; at 0 that kind of link is not a path at all.
+            {rs.links ? '' : ' These are the Atlas’s own weights, the ones the map is drawn with.'}
+          </p>
+          {LINK_KINDS.map((k) => (
+            <Slider
+              key={k.id}
+              name={k.label}
+              desc={k.describe}
+              value={links[k.id] || 0}
+              min={0}
+              max={5}
+              step={0.1}
+              onChange={(v) => patchLinks(k.id, v)}
+              format={(v) => (v === 0 ? 'off' : v.toFixed(1))}
+            />
+          ))}
+
+          <h2>Preferences</h2>
           {SCORERS.map((s) => (
             <Slider
               key={s.id}
@@ -165,6 +217,13 @@ export default function Panel({ radio, onClose }) {
             outright instead of scoring it. New rules go in{' '}
             <code>src/core/rules.js</code> — see <code>docs/RULES.md</code>.
           </p>
+          {rs.custom && (
+            <p className="info" style={{ marginTop: 12 }}>
+              <button className="chip" onClick={() => radio.setRuleset(presetById(rs.id))}>
+                back to {rs.label}
+              </button>
+            </p>
+          )}
         </>
       )}
 
@@ -259,22 +318,6 @@ export default function Panel({ radio, onClose }) {
               </p>
             </>
           )}
-
-          {radio.provider && radio.provider.extras && radio.provider.extras.setSpeed && (
-            <>
-              <h2>Dry run speed</h2>
-              <Slider
-                name="Speed"
-                desc="How fast the silent walk runs, for watching the rules work."
-                value={radio.provider.extras.speed}
-                min={1}
-                max={120}
-                step={1}
-                onChange={(v) => radio.provider.extras.setSpeed(v)}
-                format={(v) => `${v}×`}
-              />
-            </>
-          )}
         </>
       )}
 
@@ -289,18 +332,24 @@ export default function Panel({ radio, onClose }) {
             autoFocus
           />
           <div style={{ marginTop: 8 }}>
-            {hits.map((n) => (
-              <button
-                key={n.id}
-                className="hit"
-                onClick={() => {
-                  radio.reseed(n)
-                  onClose()
-                }}
-              >
-                {n.title} <span>— {n.artist} · {gLabel(n.genre)}</span>
-              </button>
-            ))}
+            {hits.map((n) => {
+              const playable = canPlay(n)
+              return (
+                <button
+                  key={n.id}
+                  className="hit"
+                  disabled={!playable}
+                  title={playable ? '' : `not on ${provider.label}`}
+                  onClick={() => {
+                    radio.reseed(n)
+                    onClose()
+                  }}
+                >
+                  {n.title} <span>— {n.artist} · {gLabel(n.genre)}</span>
+                  {!playable && <span> · not on {provider.label}</span>}
+                </button>
+              )
+            })}
           </div>
           <div className="row" style={{ marginTop: 16 }}>
             <button
@@ -313,6 +362,23 @@ export default function Panel({ radio, onClose }) {
               <div className="name">Anywhere</div>
               <div className="sub">a random, well-connected track</div>
             </button>
+          </div>
+
+          <h2>Start in a genre</h2>
+          <div className="row">
+            {genres.map(([g, list]) => (
+              <button
+                key={g}
+                className="chip genre"
+                style={{ '--g': gColor(g) }}
+                onClick={() => {
+                  radio.reseed(null, { genre: g })
+                  onClose()
+                }}
+              >
+                {gLabel(g)} <span className="count">{list.length}</span>
+              </button>
+            ))}
           </div>
 
           <h2>Archive</h2>

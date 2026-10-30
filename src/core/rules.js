@@ -34,6 +34,13 @@ export const DEFAULT_RULESET = {
   label: 'Flow',
   blurb: 'follows the strongest links, drifts genre slowly',
 
+  // Which kinds of link the walk follows, and how hard: the weight of a link is
+  // Σ components × these numbers, exactly as the Atlas weighs it on the map.
+  // null = the Atlas's own weights (graph.json meta.linkWeights), so the radio
+  // walks the same graph the map draws. Only the ratios matter: affinity is
+  // normalised per step. A kind set to 0 is not a path at all.
+  links: null,
+
   // How many recently played tracks seed the candidate pool, and how fast
   // their pull decays (1, decay, decay², …). 1 = strict chain, >1 = the walk
   // remembers where it just was.
@@ -62,6 +69,12 @@ export const DEFAULT_RULESET = {
     artistGap: 12, // same primary artist: at least N steps apart
     artistMaxInWindow: 2, // …and at most N times in the last `artistWindow`
     artistWindow: 40,
+    // Any CREDITED artist (lead, featured, remixer): at most N of the last
+    // `creditWindow` tracks. The two limits above see only the lead artist, so
+    // a featured name could carry a run on its own — one artist on 9 tracks of
+    // 10 was routine, through shared-artist links that were each legal.
+    creditMaxInWindow: 3,
+    creditWindow: 10,
     genreRunMax: 6, // after N tracks in a row in one genre, force a change
     poolCap: 320, // candidates scored per step (perf guard)
   },
@@ -82,8 +95,9 @@ export const PRESETS = [
     blurb: 'stays close: same artists, same corner of the archive',
     window: 2,
     temperature: 0.12,
+    links: { artist: 4.5, primary: 1.5, secondary: 0.3, playlist: 0.1 },
     weights: { ...DEFAULT_RULESET.weights, affinity: 1.4, genreInertia: 0.6, freshness: 0.1, bridge: 0 },
-    limits: { ...DEFAULT_RULESET.limits, artistGap: 6, artistMaxInWindow: 3, genreRunMax: 12 },
+    limits: { ...DEFAULT_RULESET.limits, artistGap: 6, artistMaxInWindow: 3, genreRunMax: 15 },
     targets: { ...DEFAULT_RULESET.targets, genreRun: 10 },
   },
   {
@@ -93,7 +107,8 @@ export const PRESETS = [
     blurb: 'crosses the archive: bridges, new genres, wider jumps',
     window: 4,
     temperature: 0.45,
-    weights: { ...DEFAULT_RULESET.weights, affinity: 0.7, genreInertia: 0.1, freshness: 0.5, bridge: 0.5, centrality: 0 },
+    links: { artist: 1.2, primary: 0.6, secondary: 1.2, playlist: 1.0 },
+    weights: { ...DEFAULT_RULESET.weights, affinity: 0.7, genreInertia: 0.1, freshness: 0.6, bridge: 0.5, centrality: 0 },
     limits: { ...DEFAULT_RULESET.limits, artistGap: 20, genreRunMax: 3 },
     targets: { ...DEFAULT_RULESET.targets, genreRun: 2 },
   },
@@ -115,6 +130,50 @@ export const PRESETS = [
 ]
 
 export const presetById = (id) => PRESETS.find((p) => p.id === id) || DEFAULT_RULESET
+
+/** The link kinds, in the order of a link's components `c`. */
+export const LINK_KINDS = [
+  { id: 'artist', label: 'Shared artist', describe: 'the two tracks share an artist (lead or featured)' },
+  { id: 'primary', label: 'Same genre', describe: 'same primary genre' },
+  { id: 'secondary', label: 'Shared genre', describe: 'a secondary genre in common — the way across genres' },
+  { id: 'playlist', label: 'Same playlist', describe: 'released in the same New Release playlist' },
+]
+
+/**
+ * After the walk has stayed `genreRun` tracks in one genre it starts to prefer
+ * a change (genreInertia); this is where it is no longer allowed to stay. Tied
+ * to the target so the one slider moves both — a cap of its own kept any
+ * stretch above 6 out of reach, whatever the slider said.
+ */
+export const genreRunCapFor = (genreRun) => Math.max(genreRun + 1, Math.round(genreRun * 1.5))
+
+/**
+ * A ruleset as saved by an earlier session, laid over the preset it started
+ * from: fields added since then get their defaults, and anything that is not a
+ * number is dropped rather than trusted.
+ */
+export function normalizeRuleset(saved) {
+  if (!saved || typeof saved !== 'object') return DEFAULT_RULESET
+  const base = presetById(saved.id)
+  const nums = (from, into) => {
+    const out = { ...into }
+    if (from && typeof from === 'object') {
+      for (const k of Object.keys(into)) if (Number.isFinite(from[k])) out[k] = from[k]
+    }
+    return out
+  }
+  const top = nums(saved, { window: base.window, windowDecay: base.windowDecay, temperature: base.temperature, shortlist: base.shortlist })
+  const linkBase = base.links || { artist: 0, primary: 0, secondary: 0, playlist: 0 }
+  return {
+    ...base,
+    ...top,
+    custom: saved.custom === true,
+    links: saved.links && typeof saved.links === 'object' ? nums(saved.links, linkBase) : base.links,
+    weights: nums(saved.weights, base.weights),
+    limits: nums(saved.limits, base.limits),
+    targets: nums(saved.targets, base.targets),
+  }
+}
 
 /* ===========================================================================
    CONSTRAINTS — hard admissibility
@@ -156,6 +215,23 @@ export const CONSTRAINTS = [
       let n = 0
       for (const pos of at) if (ctx.position - pos <= artistWindow) n++
       return n < artistMaxInWindow
+    },
+  },
+  {
+    id: 'creditQuota',
+    label: 'Credit spacing',
+    describe: 'no credited artist (featured, remixer) on more than `creditMaxInWindow` of the last `creditWindow` tracks',
+    test: (ctx, cand) => {
+      const { creditMaxInWindow, creditWindow } = ctx.ruleset.limits
+      if (!creditMaxInWindow || !ctx.creditHits) return true
+      for (const a of cand.artists || [cand.artist]) {
+        const at = ctx.creditHits.get(a)
+        if (!at) continue
+        let n = 0
+        for (let i = at.length - 1; i >= 0 && ctx.position - at[i] <= creditWindow; i--) n++
+        if (n >= creditMaxInWindow) return false
+      }
+      return true
     },
   },
   {
@@ -227,13 +303,22 @@ export const SCORERS = [
   },
   {
     id: 'freshness',
-    label: 'Freshness',
-    describe: 'favours what this session has not played yet (and long-ago plays over recent ones)',
+    label: 'Exploration',
+    describe:
+      'pulls toward corners of the graph this session has not visited yet — tracks whose neighbours have not played',
+    // "Not played yet" alone was a constant: noRepeat already keeps every
+    // played track out for 120 steps, so every admissible candidate scored 1
+    // and the slider did nothing for the first seven hours. What the walk can
+    // actually choose between is how much of a candidate's neighbourhood it has
+    // already been through.
     score: (ctx, cand) => {
       const at = ctx.lastPlayedAt.get(cand.id)
-      if (at == null) return 1
-      const age = ctx.position - at
-      return clamp01(age / Math.max(1, ctx.ruleset.limits.noRepeatWithin * 2))
+      const own = at == null ? 1 : clamp01((ctx.position - at) / Math.max(1, ctx.ruleset.limits.noRepeatWithin * 2))
+      const nbs = ctx.index.neighboursOf(cand.id)
+      if (!nbs.length) return own
+      let seen = 0
+      for (const nb of nbs) if (ctx.lastPlayedAt.has(nb.id)) seen++
+      return own * (1 - seen / nbs.length)
     },
   },
   {
@@ -258,11 +343,19 @@ export const SCORERS = [
     id: 'bridge',
     label: 'Bridge bonus',
     describe:
-      'multi-genre / bridge tracks, but only when the station is looking for a change of scene',
+      'tracks whose links lead out of their genre, but only when the walk is looking for a change of scene',
+    // `bridging` is the share of a track's links that go to another primary
+    // genre (Atlas build_graph.py). The boolean `is_bridge` is true for three
+    // tracks in four, so it could not tell a gateway from anything else.
     score: (ctx, cand) => {
       const target = Math.max(1, ctx.ruleset.targets.genreRun)
       const wantChange = clamp01(ctx.genreRun / target)
-      const isBridge = cand.is_bridge ? 1 : clamp01(((cand.genre_count || 1) - 1) / 2)
+      const isBridge =
+        cand.bridging != null
+          ? clamp01(cand.bridging / 0.6)
+          : cand.is_bridge
+            ? 1
+            : clamp01(((cand.genre_count || 1) - 1) / 2)
       return isBridge * wantChange
     },
   },

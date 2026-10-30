@@ -29,7 +29,7 @@
    Rules live in core/rules.js. Nothing in here knows what a genre is.
    -------------------------------------------------------------------------- */
 
-import { DEFAULT_RULESET, activeScorers, scoreCandidate, CONSTRAINTS } from './rules.js'
+import { DEFAULT_RULESET, LINK_KINDS, activeScorers, scoreCandidate, CONSTRAINTS } from './rules.js'
 
 /* --- deterministic RNG ---------------------------------------------------- */
 
@@ -63,6 +63,7 @@ const rngFor = (seed, step) => mulberry32((hashStr(String(seed)) ^ Math.imul(ste
  * @property {Map<string,number>} lastPlayedAt   id -> step it played at
  * @property {Map<string,number>} lastArtistAt   primary artist -> step
  * @property {Map<string,number[]>} artistHits   primary artist -> steps
+ * @property {Map<string,number[]>} creditHits   every credited artist -> steps
  * @property {number} genreRun        consecutive tracks in the current genre
  * @property {Map<string,number>} skips        id -> times skipped
  * @property {Map<string,number>} artistSkips  artist -> times skipped
@@ -75,6 +76,7 @@ function emptyState() {
     lastPlayedAt: new Map(),
     lastArtistAt: new Map(),
     artistHits: new Map(),
+    creditHits: new Map(),
     genreRun: 0,
     skips: new Map(),
     artistSkips: new Map(),
@@ -88,6 +90,7 @@ function cloneState(s) {
     lastPlayedAt: new Map(s.lastPlayedAt),
     lastArtistAt: new Map(s.lastArtistAt),
     artistHits: new Map([...s.artistHits].map(([k, v]) => [k, v.slice()])),
+    creditHits: new Map([...s.creditHits].map(([k, v]) => [k, v.slice()])),
     genreRun: s.genreRun,
     skips: new Map(s.skips),
     artistSkips: new Map(s.artistSkips),
@@ -100,12 +103,17 @@ function commit(state, index, node, why) {
   const pos = next.played.length
   const prev = next.played.length ? index.node(next.played[next.played.length - 1]) : null
   next.played.push(node.id)
-  next.steps.push({ id: node.id, why: why || { kind: 'seed', text: 'station seed' } })
+  next.steps.push({ id: node.id, why: why || { kind: 'seed', text: 'start of the path' } })
   next.lastPlayedAt.set(node.id, pos)
   next.lastArtistAt.set(node.artist, pos)
   const hits = next.artistHits.get(node.artist) || []
   hits.push(pos)
   next.artistHits.set(node.artist, hits)
+  for (const a of new Set(node.artists || [node.artist])) {
+    const at = next.creditHits.get(a) || []
+    at.push(pos)
+    next.creditHits.set(a, at)
+  }
   next.genreRun = prev && prev.genre === node.genre ? next.genreRun + 1 : 1
   return next
 }
@@ -125,6 +133,7 @@ function makeContext(state, index, ruleset) {
     lastPlayedAt: state.lastPlayedAt,
     lastArtistAt: state.lastArtistAt,
     artistHits: state.artistHits,
+    creditHits: state.creditHits,
     skips: state.skips,
     artistSkips: state.artistSkips,
     affinity,
@@ -133,20 +142,37 @@ function makeContext(state, index, ruleset) {
 }
 
 /**
+ * The per-kind link weights in force: the ruleset's own, else the Atlas's
+ * (graph.json meta.linkWeights). An array in component order, for speed.
+ */
+function linkWeightsOf(index, ruleset) {
+  const w = ruleset.links || (index.meta && index.meta.linkWeights) || {}
+  return LINK_KINDS.map((k) => (Number.isFinite(w[k.id]) ? w[k.id] : 0))
+}
+
+/** Weight of a neighbour entry under the link weights in force. */
+const linkWeight = (nb, lw) => nb.c[0] * lw[0] + nb.c[1] * lw[1] + nb.c[2] * lw[2] + nb.c[3] * lw[3]
+
+/**
  * Affinity of every reachable track to the recent window: the sum of the link
- * weights from the last `window` played tracks, decayed by recency.
+ * weights from the last `window` played tracks, decayed by recency. The weight
+ * is recomputed from the link's components, so the ruleset decides which kinds
+ * of link are paths; a link whose kinds are all switched off is not one.
  */
 function windowAffinity(state, index, ruleset) {
   const affinity = new Map()
   const w = Math.max(1, ruleset.window | 0)
   const decay = ruleset.windowDecay != null ? ruleset.windowDecay : 0.55
+  const lw = linkWeightsOf(index, ruleset)
   let maxAffinity = 0
   for (let k = 0; k < w; k++) {
     const id = state.played[state.played.length - 1 - k]
     if (!id) break
     const factor = Math.pow(decay, k)
     for (const nb of index.neighboursOf(id)) {
-      const v = (affinity.get(nb.id) || 0) + nb.w * factor
+      const lwv = linkWeight(nb, lw)
+      if (!(lwv > 0)) continue
+      const v = (affinity.get(nb.id) || 0) + lwv * factor
       affinity.set(nb.id, v)
       if (v > maxAffinity) maxAffinity = v
     }
@@ -167,13 +193,13 @@ const shared = (a = [], b = []) => a.filter((x) => b.includes(x))
  * calling it a jump. A real jump is a step with no link at all, which only
  * happens when the neighbourhood is exhausted.
  */
-function explainLink(index, windowNodes, to, topRule) {
+function explainLink(index, windowNodes, to, topRule, lw) {
   const from = windowNodes[0]
-  if (!from) return { kind: 'seed', text: 'station seed', rule: null }
+  if (!from) return { kind: 'seed', text: 'start of the path', rule: null }
   let link = null
   let hops = 0
   for (let k = 0; k < windowNodes.length; k++) {
-    const cand = index.neighboursOf(windowNodes[k].id).find((n) => n.id === to.id)
+    const cand = index.neighboursOf(windowNodes[k].id).find((n) => n.id === to.id && linkWeight(n, lw) > 0)
     if (cand) {
       link = cand
       hops = k
@@ -183,8 +209,16 @@ function explainLink(index, windowNodes, to, topRule) {
   if (!link) return { kind: 'jump', text: 'jump across the archive', rule: topRule }
   const via = windowNodes[hops]
   const tail = hops ? ` · ${hops + 1} back` : ''
-  const [artist, primary, secondary, playlist] = link.c
-  if (artist > 0) {
+  // Name the kind that carried the most weight under the rules in force, not
+  // the first one present: with shared artists turned down, a link that is
+  // also a same-genre link was taken for its genre.
+  let best = -1
+  for (let i = 0; i < 4; i++) if (link.c[i] * lw[i] > 0 && (best < 0 || link.c[i] * lw[i] > link.c[best] * lw[best])) best = i
+  const artist = best === 0
+  const primary = best === 1
+  const secondary = best === 2
+  const playlist = best === 3
+  if (artist) {
     const names = shared(via.artists || [via.artist], to.artists || [to.artist])
     return {
       kind: 'artist',
@@ -192,8 +226,8 @@ function explainLink(index, windowNodes, to, topRule) {
       rule: topRule,
     }
   }
-  if (primary > 0) return { kind: 'genre', text: `same genre · ${to.genre}${tail}`, rule: topRule }
-  if (secondary > 0) {
+  if (primary) return { kind: 'genre', text: `same genre · ${to.genre}${tail}`, rule: topRule }
+  if (secondary) {
     const g = shared(via.genres || [], to.genres || [])
     return {
       kind: 'genre2',
@@ -201,7 +235,7 @@ function explainLink(index, windowNodes, to, topRule) {
       rule: topRule,
     }
   }
-  if (playlist > 0) {
+  if (playlist) {
     const p = shared(via.playlists || [], to.playlists || [])
     return {
       kind: 'playlist',
@@ -231,7 +265,7 @@ function sample(shortlist, temperature, rnd) {
 // Constraints are dropped in this order when a step would otherwise be
 // impossible (tiny archive, every neighbour already played, …). `noRepeat` is
 // the last to go: repeating a track is the worst outcome for a radio.
-const RELAX_ORDER = ['artistQuota', 'genreRunCap', 'artistGap', 'noRepeat']
+const RELAX_ORDER = ['creditQuota', 'artistQuota', 'genreRunCap', 'artistGap', 'noRepeat']
 
 function admissible(ctx, cand, dropped) {
   for (const c of CONSTRAINTS) {
@@ -276,7 +310,7 @@ function stepAmong(state, index, ruleset, seed, only) {
       const shortlist = scored.slice(0, Math.max(1, ruleset.shortlist | 0 || 8))
       const picked = sample(shortlist, ruleset.temperature, rnd)
       const topRule = picked.score.parts.length ? picked.score.parts[0].id : null
-      const why = explainLink(index, windowNodes(state, index, ruleset), picked.node, topRule)
+      const why = explainLink(index, windowNodes(state, index, ruleset), picked.node, topRule, linkWeightsOf(index, ruleset))
       if (relax) why.relaxed = [...dropped]
       const step = {
         id: picked.node.id,
@@ -340,7 +374,7 @@ export function createStation({ index, ruleset = DEFAULT_RULESET, seedNode, seed
   const emit = () => listeners.forEach((fn) => fn())
 
   const start = (node) => {
-    state = commit(emptyState(), index, node, { kind: 'seed', text: 'station seed', rule: null })
+    state = commit(emptyState(), index, node, { kind: 'seed', text: 'start of the path', rule: null })
     queue = []
     fill()
   }
@@ -452,10 +486,16 @@ export function createStation({ index, ruleset = DEFAULT_RULESET, seedNode, seed
       emit()
       return currentStep()
     },
-    /** Swap the rules mid-stream: the current track keeps playing, the future is re-decided. */
-    setRuleset(next) {
+    /**
+     * Swap the rules mid-stream: the current track keeps playing, the future is
+     * re-decided. `keep` tracks at the head of the lookahead stay as they are —
+     * the ones already handed to a platform that cannot take them back.
+     * Re-deciding those too made the walk disagree with what then played, and
+     * the track that did play was captioned as the player going off on its own.
+     */
+    setRuleset(next, keep = 0) {
       rules = next || DEFAULT_RULESET
-      queue = []
+      queue = queue.slice(0, Math.max(0, keep | 0))
       fill()
       emit()
     },
@@ -516,9 +556,20 @@ export function createStation({ index, ruleset = DEFAULT_RULESET, seedNode, seed
   }
 }
 
-/** Pick a plausible opening track: well connected, but not always the same one. */
-export function randomSeed(index, rnd = Math.random) {
-  const pool = index.nodes.filter((n) => (n.degree || 0) >= index.maxDegree * 0.15)
-  const list = pool.length ? pool : index.nodes
-  return list[Math.floor(rnd() * list.length)]
+/**
+ * Pick a plausible opening track: well connected, but not always the same one.
+ * `ok` narrows it (what the player can play); `genre` starts in one corner of
+ * the map — the better-connected half of that genre, so the walk has somewhere
+ * to go from there.
+ */
+export function randomSeed(index, rnd = Math.random, { ok = null, genre = null } = {}) {
+  let list = genre ? index.byGenre.get(genre) || [] : index.nodes
+  if (ok) list = list.filter(ok)
+  if (!list.length) list = index.nodes
+  const floor = genre
+    ? (list[Math.floor(list.length / 2)] || {}).degree || 0
+    : index.maxDegree * 0.15
+  const pool = list.filter((n) => (n.degree || 0) >= floor)
+  const from = pool.length ? pool : list
+  return from[Math.floor(rnd() * from.length)]
 }

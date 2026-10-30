@@ -56,7 +56,7 @@
        stale, volume, volumeAvailable, repeat, shuffle, skipped }
 
    `skipped` goes with an `endedRef` that ended early: one short sentence on
-   why the platform gave up on the track (an embed its owner disabled …). The
+   why the platform gave up on the track (a video its owner disabled …). The
    engine says it out loud and moves on.
 
    Result, the answer to every command:
@@ -80,14 +80,12 @@
 
 export const CAPS = {
   FULL: 'full-tracks', // plays whole tracks
-  PREVIEW: 'preview', // plays a fragment only (30s)
   REMOTE: 'remote-device', // audio comes out of another device
   QUEUE: 'queue', // can append the next track without restarting playback
   ARTWORK: 'artwork', // can resolve cover art
   SEEK: 'seek',
   VOLUME: 'volume', // can set the playback volume
   OUTPUTS: 'outputs', // can list and switch the device the audio comes out of
-  SILENT: 'silent', // no audio at all (rule development)
   VIDEO: 'video', // the player is a video that must stay on screen (YouTube)
 }
 
