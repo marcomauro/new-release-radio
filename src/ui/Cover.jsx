@@ -7,10 +7,9 @@ import { gLabel } from '../theme.js'
    empty (and never shows a broken image).
 
    Before the first play the cover carries the way in. On a phone that means
-   putting Spotify Connect FIRST: previews are a 30-second consolation prize and
-   on a touch device they are also the fragile path (a cross-origin iframe wants
-   the tap inside itself). So the primary button connects, and the previews stay
-   available underneath, named for what they are.
+   putting Spotify Connect FIRST: a phone browser stops a YouTube video as soon
+   as the screen locks, which is no way to run a radio. So the primary button
+   connects, and playing here stays available underneath, named for what it is.
 
    Once the radio is playing, a tap turns the cover over: the back carries
    everything the archive knows about the track. That is the whole detail view —
@@ -163,7 +162,18 @@ function Back({ node, why }) {
 // reading — the browser reports a click at the end of the gesture either way.
 const TAP_SLOP = 12
 
-export default function Cover({ cover, node, started, playing, onPlay, connectFirst, onConnect, why, videoHost }) {
+export default function Cover({
+  cover,
+  node,
+  started,
+  playing,
+  onPlay,
+  connectFirst,
+  onConnect,
+  playHereLabel,
+  why,
+  videoHost,
+}) {
   const [src, setSrc] = useState(null)
   const [failed, setFailed] = useState(false)
   const [flipped, setFlipped] = useState(false)
@@ -182,7 +192,7 @@ export default function Cover({ cover, node, started, playing, onPlay, connectFi
 
   const showImage = src && !failed
   // Before the first play the cover carries the way in, so it must not flip:
-  // the tap belongs to Connect (or previews), not to a detail view.
+  // the tap belongs to Connect (or to playing here), not to a detail view.
   const canFlip = started && !!node && !videoHost
 
   return (
@@ -236,7 +246,7 @@ export default function Cover({ cover, node, started, playing, onPlay, connectFi
                 </button>
                 <div className="sub">whole tracks, on this phone or any of your devices</div>
                 <button className="tiny" onClick={onPlay}>
-                  or listen to 30-second previews
+                  {playHereLabel ? `or play it here on ${playHereLabel}` : 'or play it here'}
                 </button>
               </div>
             ) : (

@@ -20,8 +20,8 @@ player, and the player change without touching the rules.
  │ core/                          │   │ providers/                      │
  │   graph.js   archive + index    │   │   spotify/connect  (full+queue) │
  │   rules.js   constraints/scorers│   │   youtube          (full, video)│
- │                                 │   │   spotify/embed    (preview)    │
- │   walker.js  the endless walk   │   │   simulated        (silent)     │
+ │                                 │   │                                 │
+ │   walker.js  the endless walk   │   │                                 │
  │                                 │   │                                 │
  │  pure, synchronous, testable in  │   │  async, all failures contained  │
  │  Node — no DOM, no network       │   │  and reported via poll()        │
@@ -86,7 +86,7 @@ Not a smaller screen — a different set of rules:
 | --- | --- |
 | timers freeze when the app leaves the screen | the platform queue is filled to cover ten minutes of music while `document.hidden`, and the walk fast-forwards on return (`useRadio.js`, `targetDepth`) |
 | the network comes and goes | the next section — the hardest case in the whole app |
-| a cross-origin iframe wants the tap inside itself | previews are the declared fallback on touch; Connect is offered first |
+| a browser video stops when the screen locks | YouTube is the declared fallback on touch; Connect is offered first |
 | fingers, not pointers | 34 px minimum on anything tappable, under `@media (hover: none)` |
 | `100%` height measures the large viewport | `100dvh`, with `100%` as the fallback |
 | a square that must fit two dimensions | the cover is the largest square that fits the space **left over**: `.cover-slot` is a size container and the cover is `min(--cover, 100cqw, 100cqh)`. Sized from the viewport it could not shrink, and on a short window it overflowed upward onto the pills |
@@ -283,6 +283,7 @@ ever measured.
 | script | what it proves |
 | --- | --- |
 | `scripts/walk.mjs` | the walk itself, in the terminal, with `--explain` and `--stats-only`. Runs in the deploy workflow as a smoke test |
+| `scripts/rules_check.mjs` | that every control in the panel moves the walk: each one is turned end to end on the same seeds and the statistic it claims to drive must move, by a margin. Two once did nothing — see docs/RULES.md, "Every control must move the walk" |
 | `scripts/net_tests.mjs` | what the radio does when the network comes and goes — Spotify stubbed at the network boundary with real state (a device, a current track, an actual queue), driven by Playwright. Every check asserts on what was **sent to the device** or what the screen **says** |
 | `scripts/fit_tests.mjs` | whether the layout holds at eleven window sizes: the cover square and clear of the top bar, the title, the controls and the footer; the sleeve turning on a click; the panel's search field inside its column |
 
@@ -333,7 +334,7 @@ The radio should degrade, never break:
   merely *could not be sent* is not that, and changes nothing;
 - the connection drops mid-track → the screen keeps what it knew, the queue keeps
   being fed, and nothing is restarted;
-- no active Spotify device → a plain message, and previews remain available;
+- no active Spotify device → a plain message, and YouTube remains available;
 - a corner of the graph is exhausted → the walk jumps, and says so;
 - constraints make a step impossible → they are relaxed in a documented order
   (`RELAX_ORDER`), repeats last.

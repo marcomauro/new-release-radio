@@ -12,15 +12,14 @@ import { gColor, gLabel } from './theme.js'
    reason the walk chose it, and one set of controls. Everything else is behind
    a chip.
 
-   There is exactly ONE player on this page — ours. When previews are the source,
-   Spotify's iframe still does the decoding, but it is caged (see `.embed-cage`:
-   the iFrame API replaces the element it is given, so the cage is what carries
-   the styling) and driven entirely by the controls below. YouTube is the one
-   exception to "out of sight": its terms want the video on screen, so it plays
-   in the cover's place (ui/Cover.jsx), still driven by the same controls. */
+   There is exactly ONE set of controls on this page — ours. Spotify Connect
+   plays on the user's own device; YouTube's terms want the video on screen, so
+   it plays in the cover's place (ui/Cover.jsx), still driven by the same
+   controls. */
 
 // Touch + no hover: a phone or a tablet. Used for the one decision that really
-// differs there — Connect first, previews as a named fallback.
+// differs there — Connect first (a phone browser stops a YouTube video the
+// moment the screen locks), YouTube as a named fallback.
 const isTouchDevice = () =>
   typeof window !== 'undefined' &&
   typeof window.matchMedia === 'function' &&
@@ -40,8 +39,8 @@ export default function App() {
     document.documentElement.style.setProperty('--genre', gColor(genre))
   }, [genre])
 
-  // The preview provider needs a DOM host for the official iframe player; a
-  // video player (YouTube) gets one inside the cover, where it stays visible.
+  // A video player (YouTube) needs a DOM host: it gets one inside the cover,
+  // where it stays visible.
   const provider = radio.provider
   const needsHost = !!(provider && provider.mount)
   const isVideo = !!(provider && provider.caps.has(CAPS.VIDEO))
@@ -76,7 +75,6 @@ export default function App() {
     )
 
   const upNext = radio.upNext[0]
-  const isPreview = !!(provider && provider.caps.has(CAPS.PREVIEW))
 
   // The volume is pointless on a phone playing to itself (Spotify refuses the
   // command, the buttons on the side already do it) and useful the moment the
@@ -106,8 +104,13 @@ export default function App() {
         ) : radio.canConnect ? (
           <ConnectPill onConnect={radio.connectSpotify} />
         ) : null}
-        <button className="chip accent" onClick={() => setPanel(true)} title="Station rules">
+        <button
+          className="chip accent"
+          onClick={() => setPanel(true)}
+          title={`Path through the Atlas: ${radio.ruleset.label}${radio.ruleset.custom ? ', tuned by hand' : ''}`}
+        >
           {radio.ruleset.label}
+          {radio.ruleset.custom ? '*' : ''}
         </button>
         <button className="chip" onClick={() => setPanel(true)} title={provider ? provider.blurb : ''}>
           {/* Both labels ship; CSS picks one by width, so no resize listener. */}
@@ -129,8 +132,9 @@ export default function App() {
             started={radio.started}
             playing={radio.playing}
             onPlay={radio.play}
-            connectFirst={touch && isPreview && radio.canConnect}
+            connectFirst={touch && !radio.canChooseOutput && radio.canConnect && !radio.providerChosen}
             onConnect={radio.connectSpotify}
+            playHereLabel={provider ? provider.label : ''}
             why={radio.why}
             videoHost={needsHost && isVideo ? hostRef : null}
           />
@@ -162,25 +166,10 @@ export default function App() {
           volume={radio.volume}
           canSetVolume={radio.canSetVolume}
           onVolume={radio.setVolume}
-          volumeReason={
-            radio.volumeNote ||
-            (isPreview
-              ? 'the Spotify preview player has no volume control — connect Spotify for full tracks and volume'
-              : 'this player does not expose a volume control')
-          }
+          volumeReason={radio.volumeNote || 'this player does not expose a volume control'}
           onVolumeUnavailable={radio.explainVolume}
           showVolume={showVolume}
         />
-
-        {/* Spotify decodes the preview. The API replaces the inner element with
-            its own iframe, so the CAGE carries the styling that keeps it out of
-            sight — otherwise Spotify's player lands in the layout with its own
-            controls. Ours are the only ones on screen. */}
-        {needsHost && !isVideo && (
-          <div className="embed-cage" aria-hidden="true">
-            <div ref={hostRef} />
-          </div>
-        )}
       </div>
 
       {radio.notice ? <div className="notice">{radio.notice}</div> : null}

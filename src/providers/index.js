@@ -8,8 +8,6 @@
    -------------------------------------------------------------------------- */
 
 import { createConnectProvider } from './spotify/connect.js'
-import { createEmbedProvider } from './spotify/embed.js'
-import { createSimulatedProvider } from './simulated.js'
 import { createYouTubeProvider } from './youtube.js'
 import { isLoggedIn } from './spotify/auth.js'
 
@@ -17,18 +15,19 @@ export { CAPS } from './provider.js'
 
 /** Instantiate every provider once, in preference order. */
 export function createProviders() {
-  return [createConnectProvider(), createYouTubeProvider(), createEmbedProvider(), createSimulatedProvider()]
+  return [createConnectProvider(), createYouTubeProvider()]
 }
 
 /**
  * Which provider runs on load.
  *
  * The rule that matters: **a live Spotify session outranks habit.** If there is
- * a token, the radio remote-controls Spotify and plays whole tracks; it must not
- * fall back to 30-second previews just because previews are what played last
- * time. That was a real bug — the remembered id was consulted before the login
- * state, so connecting Spotify left the radio on previews until you switched the
- * player by hand.
+ * a token, the radio remote-controls Spotify; it must not stay on YouTube just
+ * because YouTube is what played last time. That was a real bug (back when the
+ * fallback was the 30-second preview player) — the remembered id was consulted
+ * before the login state, so connecting Spotify left the radio where it was
+ * until you switched the player by hand. Without a token, YouTube: whole
+ * tracks, no login.
  *
  * Only two things outrank a live session:
  *   • `?player=<id>` in the URL — an explicit, per-visit instruction;
@@ -50,5 +49,5 @@ export function preferredProviderId(providers, saved) {
     // never resume into Connect without a token
     if (remembered !== 'spotify-connect' || loggedIn) return remembered
   }
-  return loggedIn ? 'spotify-connect' : 'spotify-embed'
+  return loggedIn ? 'spotify-connect' : 'youtube'
 }

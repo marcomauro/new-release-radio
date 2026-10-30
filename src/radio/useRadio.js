@@ -12,8 +12,8 @@
      choose, the walk MOVES ONTO IT instead of fighting: whatever is playing
      becomes the current node.
 
-   • no QUEUE (previews, dry run) — we advance ourselves when poll() reports the
-     track ended, and start the next one.
+   • no QUEUE (YouTube) — we advance ourselves when poll() reports the track
+     ended, and start the next one.
 
    Joining a session that is already running is a first-class case, not an edge
    case: on load, if Spotify is already playing, the radio adopts that session
@@ -97,7 +97,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { loadArchive } from '../core/graph.js'
 import { createStation, randomSeed } from '../core/walker.js'
-import { DEFAULT_RULESET, presetById } from '../core/rules.js'
+import { DEFAULT_RULESET, presetById, normalizeRuleset } from '../core/rules.js'
 import { createProviders, preferredProviderId, CAPS } from '../providers/index.js'
 import { makeSnapshot, ok, failed } from '../providers/provider.js'
 import { completeLoginIfNeeded, isLoggedIn } from '../providers/spotify/auth.js'
@@ -356,7 +356,11 @@ export function useRadio() {
         const loaded = await loadArchive()
         if (!alive) return
         const saved = readSession()
-        const rules = presetById(saved && saved.rulesetId)
+        // The whole ruleset, not just the preset's id: a session saved only the
+        // id, so every slider moved in the panel came back at its default on
+        // the next visit.
+        const rules =
+          saved && saved.ruleset ? normalizeRuleset(saved.ruleset) : presetById(saved && saved.rulesetId)
         const askedTrack =
           new URLSearchParams(window.location.search).get('track') ||
           new URLSearchParams(window.location.search).get('seed')
@@ -448,6 +452,7 @@ export function useRadio() {
         providerId,
         providerPinned,
         rulesetId: ruleset.id,
+        ruleset,
       })
     }, 500)
     return () => clearTimeout(t)
@@ -1189,21 +1194,29 @@ export function useRadio() {
     [station, startCurrent]
   )
 
+  /**
+   * Start the walk again from `node`, or from a random well-connected track
+   * (`{ genre }` keeps it in one corner of the map). Only from what the current
+   * player can play, when it is chosen for us. Each start gets a fresh RNG seed:
+   * keyed on the track alone, starting from the same song twice replayed the
+   * same walk note for note.
+   */
   const reseed = useCallback(
-    async (node) => {
+    async (node, { genre = null } = {}) => {
       if (!station || !archive) return
-      station.reseed(node || randomSeed(archive.index))
+      const ok = provider && provider.playable ? (n) => provider.playable(n) : null
+      const from = node || randomSeed(archive.index, Math.random, { ok, genre })
+      station.reseed(from, `${from.id}:${Date.now().toString(36)}`)
       setWantsPlay(true)
       await startCurrent()
     },
-    [station, archive, startCurrent]
+    [station, archive, provider, startCurrent]
   )
 
   /**
-   * Connect Spotify from anywhere, whatever provider is on air. The preview
-   * provider has no authenticate() of its own, so asking the *current* provider
-   * to log in was a dead end: this reaches into the registry for the one that
-   * can play full tracks.
+   * Connect Spotify from anywhere, whatever provider is on air. YouTube has no
+   * Spotify login of its own, so asking the *current* provider to log in would
+   * be a dead end: this reaches into the registry for the one that has.
    */
   const connectSpotify = useCallback(() => {
     const list = providersRef.current || []
@@ -1215,14 +1228,16 @@ export function useRadio() {
     (next) => {
       const rules = typeof next === 'string' ? presetById(next) : next
       setRulesetState(rules)
-      if (station) station.setRuleset(rules)
       // A queue platform already holds a few tracks decided by the old rules,
       // and Spotify has no way to take them back — the API only appends. So they
-      // play and the walk re-decides from there: a few tracks of lag, no
-      // interruption. Clearing the queue would mean restarting playback.
+      // play, the walk KEEPS them as its own next steps, and re-decides from
+      // there: a track of lag, no interruption, and no caption claiming the
+      // player went off by itself. Clearing the queue would mean restarting
+      // playback.
+      if (station) station.setRuleset(rules, canQueue ? queuedRefs.current.length : 0)
       rerender()
     },
-    [station, rerender]
+    [station, canQueue, rerender]
   )
 
   const seek = useCallback(
@@ -1327,18 +1342,9 @@ export function useRadio() {
       volumeNote ||
       (isPhone
         ? `${out.name} sets its own volume — use the buttons on the device`
-        : canConnect
-          ? 'the Spotify preview player has no volume control — connect Spotify (top right) for full tracks, volume and device choice'
-          : 'this player has no volume control')
+        : 'this player has no volume control')
     flash(why)
-  }, [canConnect, volumeNote, provider, flash])
-
-  // Logged in but listening to previews: say it once, quietly, instead of
-  // silently serving 30-second clips to someone with a Premium session.
-  const hint =
-    !canQueue && isLoggedIn() && provider && !provider.caps.has(CAPS.FULL)
-      ? 'Spotify is connected — switch the player to Connect for full tracks'
-      : ''
+  }, [volumeNote, provider, flash])
 
   // A dropped connection does not get the amber line: it is a state of the
   // link, shown on the device pill, and it says so in words only when the user
@@ -1349,11 +1355,16 @@ export function useRadio() {
     phase,
     error,
     archive,
-    notice: notice || ambient || hint,
+    notice: notice || ambient,
 
     provider,
     providers: providers || [],
     providerId: provider ? provider.id : null,
+    // The player was a decision (picked in the panel, or `?player=` in the
+    // URL), not the default the radio fell back to.
+    providerChosen:
+      providerPinned ||
+      (typeof window !== 'undefined' && !!new URLSearchParams(window.location.search).get('player')),
     switchProvider,
     authenticate: () => provider && provider.authenticate && provider.authenticate(),
     connectSpotify,

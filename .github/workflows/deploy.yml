@@ -53,6 +53,10 @@ jobs:
       - name: Walk smoke test
         run: node scripts/walk.mjs -n 120 --stats-only
 
+      # Every control in the panel must still move the walk (a few seconds).
+      - name: Rules check
+        run: node scripts/rules_check.mjs
+
       - name: Install dependencies
         run: npm ci
 

@@ -19,12 +19,14 @@ Archive: **1055 tracks · 9739 links · 12 genres** (playlists #1–#49 + 1 extr
   tracks. It never materialises a list, so the stream is infinite by
   construction and every step can react to what you just heard (and to what you
   skipped).
-- **Rules, in one file.** Which track comes next is decided by *constraints*
-  (hard: no repeats, artist spacing) and *scorers* (soft: graph affinity, genre
-  inertia, mood and tempo continuity, freshness…), all in
-  [`src/core/rules.js`](src/core/rules.js). The real rule set is the next piece
-  of work — this is the scaffolding it plugs into. See
-  [`docs/RULES.md`](docs/RULES.md).
+- **Rules, in one file.** Which track comes next is decided by *which links are
+  paths* (shared artist, same genre, shared genre, same playlist — weighted as
+  the Atlas weighs them, or as you tune them), *constraints* (hard: no repeats,
+  artist spacing) and *scorers* (soft: graph affinity, genre inertia, mood and
+  tempo continuity, exploration…), all in
+  [`src/core/rules.js`](src/core/rules.js). See [`docs/RULES.md`](docs/RULES.md).
+  Every control in the panel is checked to actually move the walk:
+  `node scripts/rules_check.mjs`.
 - **Provider-agnostic playback.** Spotify is an implementation, not an
   assumption. Everything above `src/providers/` deals in archive tracks and one
   playback contract, so a second platform is a new folder and a line in a
@@ -39,7 +41,7 @@ Archive: **1055 tracks · 9739 links · 12 genres** (playlists #1–#49 + 1 extr
         │
    radio/useRadio.js  the engine: walk ⇄ player
         │
-   providers/         Spotify Connect · YouTube · Spotify preview · Dry run
+   providers/         Spotify Connect · YouTube
         │
    ui/                cover, two lines, three buttons
 ```
@@ -63,6 +65,7 @@ Watch the rules work without a browser or an account:
 node scripts/walk.mjs -n 40                 # 40 steps of the default station
 node scripts/walk.mjs -n 200 --preset drift --explain
 node scripts/walk.mjs -n 500 --stats-only   # repeats, artist spread, genre runs
+node scripts/rules_check.mjs --table        # does every panel control move the walk?
 ```
 
 Same seed + same preset + same archive = the same walk, every time.
@@ -105,22 +108,24 @@ npm run preview   # serve dist/ for a realistic check
 
 ## Listening
 
-Four players ship, picked from the provider registry:
+Two players ship, picked from the provider registry:
 
 | player | what you hear | needs |
 | --- | --- | --- |
-| **Spotify preview** (default) | 30 s previews, advanced automatically | nothing |
 | **Spotify Connect** | **whole tracks**, on your own Spotify device | Premium login |
-| **YouTube** | **whole tracks**, the video playing where the cover is | nothing |
-| **Dry run** | nothing — a silent walk at up to 120× | nothing |
+| **YouTube** (default without a login) | **whole tracks**, the video playing where the cover is | nothing |
+
+(A 30-second Spotify preview player and a silent "dry run" shipped until October
+2026. Neither was a way to listen to a radio; `scripts/walk.mjs` and
+`scripts/rules_check.mjs` do the dry run's job of watching the rules work.)
 
 **YouTube** plays the video New Release Atlas matched to each track (the `yt`
 field of `graph.json`, resolved offline there and confirmed by hand where it was
 doubtful). Not every track has one, so on YouTube the walk only chooses tracks
 that do; a track picked by hand without a video, or one whose owner has
 disabled embedding, is passed over and the notice line says which and why.
-YouTube's terms want the video seen, so it is the one player that is not caged:
-it plays in the cover's square, with nothing laid over it. Two limits come with
+YouTube's terms want the video seen, so it plays in the cover's square, with
+nothing laid over it. Two limits come with
 it on a phone: a browser may want the first tap on the video itself (the
 radio says so), and a video does not play while the app is in the background.
 Pick it in the panel, or open `?player=youtube`.
@@ -132,8 +137,8 @@ playlist is ever created. The app is a remote control: the audio comes out of
 Spotify on the device you choose.
 
 **A live Spotify session always wins.** If there is a token, the radio
-remote-controls Spotify — it never serves 30-second previews to someone with a
-Premium session just because previews are what played last time. And if Spotify
+remote-controls Spotify — it never stays on YouTube for someone with a Premium
+session just because YouTube is what played last time. And if Spotify
 is *already playing* when the page loads, the radio **joins that session**
 instead of interrupting it: no restart, and when the track is in the archive the
 walk continues from it. The only things that outrank this are `?player=<id>` in
@@ -142,15 +147,9 @@ the URL and a player you picked by hand in the panel.
 It also works the other way round — if you change track yourself in Spotify, the
 walk **moves onto that track** and carries on from there instead of fighting you.
 
-**One player, ours.** Whatever the source, the page shows a single set of
-controls: cover, progress, play/pause, next, new station, volume, and a pill for
-the device. When previews are the source, Spotify's iframe still decodes the
-audio but is **caged** and inert — an engine, not a second player.
-
-> The cage matters: the Spotify iFrame API **replaces** the element you hand it
-> with its own `<iframe>`, so styling that element does nothing — the player
-> lands in the layout, full width, with Spotify's own controls. `.embed-cage`
-> wraps it instead, and the API can do what it likes to the child inside.
+**One set of controls, ours.** Whatever the source, the page shows a single set
+of controls: cover, progress, play/pause, next, new path, volume, and a pill for
+the device.
 
 **On a phone.** Two things work differently, both deliberate:
 
@@ -164,28 +163,20 @@ audio but is **caged** and inert — an engine, not a second player.
   **fast-forwards** over whatever played while it was asleep instead of losing
   those steps.
 - **Connect comes first.** Before the first play on a touch device the cover
-  offers `connect Spotify`, with previews underneath, named for what they are:
-  30-second clips, no volume, and on iOS a cross-origin iframe that wants the tap
-  inside itself.
+  offers `connect Spotify`, with YouTube underneath, named for what it is: a
+  video in the browser, which stops when the screen locks.
 
-**Not connected?** A `connect Spotify` pill sits in the top bar — the preview
-provider has no login of its own, so the pill asks the registry for the player
-that does full tracks. Without it the main screen dead-ended: no volume, no
-device list, 30-second clips, and no way out that did not involve finding the
-panel.
+**Not connected?** A `connect Spotify` pill sits in the top bar — YouTube has no
+Spotify login of its own, so the pill asks the registry for the player that has.
 
-**Volume** drives the real device volume over Connect. The Spotify preview embed
-exposes no volume control at all, so there the slider stays visible but disabled
-and says why, rather than pretending to work.
+**Volume** drives the real device volume over Connect. A device that refuses it
+(a phone sets its own) leaves the slider visible but disabled, saying why,
+rather than pretending to work.
 
 **Where it plays**: the pill in the top bar lists your Spotify devices (phone,
 desktop, speaker, car) and moves the stream without a gap — it is the contract's
 `CAPS.OUTPUTS`, not a Spotify special case, so a future platform gets the same
 pill for free.
-
-**Dry run** is for developing the rules: covers and captions run past at speed
-with no streaming account and no network, and it is the proof that the provider
-seam is real.
 
 ### Spotify setup (Connect only)
 
@@ -201,7 +192,7 @@ http://localhost:5173/new-release-radio/            # local dev
 
 The client id lives in [`src/providers/spotify/auth.js`](src/providers/spotify/auth.js)
 and can be overridden at build time with `VITE_SPOTIFY_CLIENT_ID`.
-Without the redirect registered, the previews still work: only Connect needs it.
+Without the redirect registered, YouTube still works: only Connect needs it.
 
 ### Cover art
 
@@ -300,6 +291,7 @@ new-release-radio/
 ├── scripts/
 │   ├── sync_graph.py              # refresh + validate the snapshot
 │   ├── walk.mjs                   # run the walk in the terminal
+│   ├── rules_check.mjs            # every panel control must move the walk
 │   ├── net_tests.mjs              # the radio on a network that comes and goes
 │   ├── fit_tests.mjs              # the layout at eleven window sizes
 │   └── make_icons.mjs             # re-render the PNG icons from one SVG source
@@ -311,8 +303,8 @@ new-release-radio/
 │   ├── providers/
 │   │   ├── provider.js            # the playback contract (CAPS, Snapshot, Result)
 │   │   ├── index.js               # the registry
-│   │   ├── simulated.js           # dry run: the radio with the sound off
-│   │   └── spotify/               # auth (PKCE) · api · connect · embed · artwork
+│   │   ├── youtube.js             # whole tracks, the video in the cover
+│   │   └── spotify/               # auth (PKCE) · api · connect · artwork
 │   ├── radio/useRadio.js          # the engine: walk ⇄ player
 │   ├── ui/                        # Cover · Controls · OutputPill · Panel
 │   ├── App.jsx · theme.js · index.css
@@ -327,9 +319,8 @@ new-release-radio/
   the final answer: time of day, energy arcs across an hour, key/harmonic
   transitions, "never two remixes in a row", listening history across sessions.
   The engine, the UI and the players should not need to change for any of them.
-- **A second platform.** The contract in `docs/PROVIDERS.md` exists so the
-  archive can outlive Spotify. The Dry-run provider is there to keep that path
-  honest.
+- **A third platform.** The contract in `docs/PROVIDERS.md` exists so the
+  archive can outlive Spotify; YouTube is the proof that it does.
 - **Sharing a station.** A walk is reproducible from `(seed, preset, archive)`,
   so a station is a URL: `?seed=<track-id>&preset=drift`.
 - **A rolling playlist instead of the queue — decided when the current build has

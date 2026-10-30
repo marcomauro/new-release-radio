@@ -259,7 +259,7 @@ async function install(page, world) {
   await page.route('**://marcomauro.github.io/**', (route) =>
     route.fulfill({ contentType: 'application/json', body: JSON.stringify(graph) })
   )
-  // Covers and the preview iframe are not what is under test.
+  // Covers are not what is under test.
   await page.route('**://open.spotify.com/**', (route) =>
     route.fulfill({ contentType: 'application/json', body: JSON.stringify({ thumbnail_url: '' }) })
   )
@@ -1172,7 +1172,7 @@ export default async function run() {
     }
 
     if (want('y6')) {
-      console.log('\ny6 · leaving YouTube for the previews leaves one player, not two')
+      console.log('\ny6 · leaving YouTube for Spotify Connect leaves one player, not two')
       const { context, page } = await openYouTube(browser, { startId: ytStart.id, yt: { durationSec: 60 } })
       await page.locator('.bigplay').click()
       await sleep(1500)
@@ -1180,7 +1180,8 @@ export default async function run() {
       await page.waitForSelector('.panel', { timeout: 5000 })
       await page.locator('.panel > .row .chip', { hasText: 'player' }).click()
       check('YouTube is listed and chosen', (await page.locator('.panel .opt.on', { hasText: 'YouTube' }).count()) === 1)
-      await page.locator('.panel .opt', { hasText: 'Spotify preview' }).click()
+      check('only Spotify Connect and YouTube are offered', (await page.locator('.panel .opt', { hasText: /Spotify preview|Dry run/ }).count()) === 0)
+      await page.locator('.panel .opt', { hasText: 'Spotify Connect' }).click()
       await sleep(1200)
       const calls = await yt.calls(page)
       check('the video was paused and the player taken down',
